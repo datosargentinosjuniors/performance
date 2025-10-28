@@ -5,5 +5,4 @@ datetime
 io
 matplotlib
 matplotlib.pyplot
-skillcorner.client
 skillcorner
