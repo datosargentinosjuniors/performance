@@ -74,6 +74,10 @@ def fetch_physical(competition: int, competition_edition: int, cache_date: str) 
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
+    # Normalizaciones útiles a mano (por si faltan en algunos registros)
+    if "player_short_name" in df.columns and "player_name" in df.columns:
+        df["player_short_name"] = df["player_short_name"].fillna(df["player_name"])
+
     return df
 
 
@@ -84,6 +88,45 @@ with st.spinner("Descargando datos físicos desde SkillCorner…"):
 if df.empty:
     st.error("No se recibieron datos del endpoint /api/physical.")
     st.stop()
+
+# =========================
+# UTILIDADES DE ETIQUETA
+# =========================
+def _set_font_family():
+    plt.rcParams['font.family'] = ['Proxima Nova', 'DejaVu Sans', 'Arial', 'Helvetica']
+
+def _pos_text(row: pd.Series) -> str:
+    """
+    Devuelve position_short si existe; si no, position; si no, '-'.
+    """
+    val = None
+    if "position_short" in row and pd.notna(row["position_short"]) and str(row["position_short"]).strip() != "":
+        val = str(row["position_short"]).strip()
+    elif "position" in row and pd.notna(row["position"]) and str(row["position"]).strip() != "":
+        val = str(row["position"]).strip()
+    return val if val else "-"
+
+def _mins_text(row: pd.Series) -> str:
+    """
+    Redondea minutos a entero si existe, si no '-'.
+    """
+    if "minutes_full_all" in row:
+        try:
+            mins_val = pd.to_numeric(row["minutes_full_all"], errors="coerce")
+        except Exception:
+            mins_val = np.nan
+        if pd.notna(mins_val):
+            return f"{int(round(float(mins_val)))}"
+    return "-"
+
+def _build_player_row_label(name: str, pos_text: str, mins_text: str) -> str:
+    """
+    Etiqueta: Jugador | POS | MIN min
+    """
+    name_txt = name if name else "-"
+    pos_txt = pos_text if pos_text else "-"
+    mins_txt = mins_text if mins_text else "-"
+    return f"{name_txt} | {pos_txt} | {mins_txt} min"
 
 # =========================
 # FILTROS EN PÁGINA
@@ -142,59 +185,97 @@ if df_match.empty:
 st.divider()
 st.subheader(f"Partido: {match_label}")
 
-
 # =========================
 # FUNCIONES DE VISUALIZACIÓN
 # =========================
-def _set_font_family():
-    plt.rcParams['font.family'] = ['Proxima Nova', 'DejaVu Sans', 'Arial', 'Helvetica']
-
-
 def render_team_vis1_total_vs_mpm(df_team, team_name):
+    """
+    Visualización 1
+    - Barras = metros por minuto (m/min)
+    - Texto en la base (inicio de barra) = distancia total (m)
+    - Orden: mayor m/min arriba
+    - Etiquetas eje Y: 'Jugador | POS | MIN min'
+    """
     need = ['player_short_name', 'total_distance_full_all', 'total_metersperminute_full_all']
     if not all(c in df_team.columns for c in need):
         return
 
-    d = df_team[need].copy()
-    # Orden: mayor total arriba
-    d = d.sort_values('total_distance_full_all', ascending=False).reset_index(drop=True)
+    d = df_team.copy()
+    for c in ['total_metersperminute_full_all', 'total_distance_full_all', 'minutes_full_all']:
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors='coerce')
 
-    players = d['player_short_name'].tolist()
-    totals = pd.to_numeric(d['total_distance_full_all'], errors='coerce').fillna(0).to_numpy()
-    mpm = pd.to_numeric(d['total_metersperminute_full_all'], errors='coerce').fillna(0).to_numpy()
-    y = np.arange(len(players))
+    # Orden: mayor m/min arriba
+    d = d.sort_values('total_metersperminute_full_all', ascending=False).reset_index(drop=True)
 
-    height = max(6, len(players) * 0.05)
+    # Etiquetas con posición corta/posición y minutos
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+
+    d['row_label'] = d.apply(
+        lambda r: _build_player_row_label(
+            r.get('player_short_name', '-'),
+            _pos_text(r),
+            _mins_text(r)
+        ),
+        axis=1
+    )
+
+    labels = d['row_label'].tolist()
+    mpm    = d['total_metersperminute_full_all'].fillna(0).to_numpy()  # barras
+    totals = d['total_distance_full_all'].fillna(0).to_numpy()          # texto en base
+    y = np.arange(len(labels))
+
+    height = max(6, len(labels) * 0.08)
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
-    ax.barh(y, totals, color=RED_TOTAL, alpha=0.9, edgecolor='none')
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
+    # Barras m/min
+    bars = ax.barh(y, mpm, color=BLUE_HSR, alpha=0.95, edgecolor='none')
+
+    # Escala X con margen a la derecha (10%) para que entre la etiqueta al final
+    max_mpm = float(np.nanmax(mpm)) if len(mpm) else 0.0
+    right_pad = max(0.5, max_mpm * 0.10)
+    ax.set_xlim(0, max_mpm + right_pad)
+
+    # Ejes y grilla
+    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.1f}'))
     ax.grid(axis='x', linestyle=':', alpha=0.3)
+    ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
-    ax.set_xlabel("Distancia total (m)")
-    ax.set_title(f"{team_name} — Distancia total (m) + m/min", fontsize=14, pad=12, fontweight='bold')
-    # Poner mayor arriba
-    ax.invert_yaxis()
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Metros por minuto (m/min)")
+    ax.set_title(f"{team_name} — m/min por jugador + distancia total (m)", fontsize=14, pad=12, fontweight='bold')
+    ax.invert_yaxis()  # mayor arriba
 
-    # m/min al inicio de la barra
-    for yi, val in zip(y, mpm):
-        ax.text(100, yi, f"{val:.1f} m/min",
-                va='center', ha='left', color='white', fontweight='bold',
-                fontsize=10, path_effects=[pe.withStroke(linewidth=1, foreground="black")])
+    # Texto en la base: distancia total (m)
+    x0, x1 = ax.get_xlim()
+    base_x = x0 + 0.015 * (x1 - x0)  # 1.5% del ancho del eje, margen visual estable
+    for yi, t in enumerate(totals):
+        txt = f"{t:,.0f} m" if t > 0 else "–"
+        ax.text(base_x, yi, txt,
+                va='center', ha='left',
+                color='white', fontsize=10, fontweight='bold',
+                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
 
-    # Metros al final (adentro o afuera)
-    for yi, t in zip(y, totals):
-        if t > 0:
-            if t >= 1500:
-                ax.text(t * 0.98, yi, f"{t:,.0f} m",
-                        va='center', ha='right', color='white', fontweight='bold',
-                        fontsize=10, path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-            else:
-                ax.text(t + 100, yi, f"{t:,.0f} m",
-                        va='center', ha='left', color='white', fontweight='bold', fontsize=10,
-                        path_effects=[pe.withStroke(linewidth=1.5, foreground="black")])
+    # Etiqueta de m/min al final de cada barra
+    for rect, val in zip(bars.patches, mpm):
+        if val <= 0:
+            continue
+        yi = rect.get_y() + rect.get_height() / 2.0
+        x_end = rect.get_x() + rect.get_width()
+
+        # Si la barra es suficientemente larga, texto adentro; si no, afuera
+        if val >= 8:  # umbral ajustable
+            x_label = x_end - 0.02 * (x1 - x0)  # un pelín hacia adentro
+            ax.text(x_label, yi, f"{val:.1f} m/min",
+                    va='center', ha='right',
+                    color='white', fontweight='bold', fontsize=10,
+                    path_effects=[pe.withStroke(linewidth=1, foreground="black")])
+        else:
+            ax.text(x_end + 0.01 * (x1 - x0), yi, f"{val:.1f} m/min",
+                    va='center', ha='left', color='black', fontweight='bold', fontsize=10)
 
     plt.tight_layout()
     st.pyplot(fig)
@@ -202,6 +283,9 @@ def render_team_vis1_total_vs_mpm(df_team, team_name):
 
 
 def _prep_b345(df_team: pd.DataFrame):
+    """
+    Prepara columnas numéricas para HID y crea suma y %.
+    """
     need = [
         'player_short_name', 'total_distance_full_all',
         'running_distance_full_all', 'hsr_distance_full_all', 'sprint_distance_full_all'
@@ -209,55 +293,64 @@ def _prep_b345(df_team: pd.DataFrame):
     if not all(c in df_team.columns for c in need):
         return None
 
-    d = df_team[need].copy()
+    d = df_team[need + [c for c in ['position', 'position_short', 'minutes_full_all'] if c in df_team.columns]].copy()
+
     for c in [
         'total_distance_full_all', 'running_distance_full_all',
-        'hsr_distance_full_all', 'sprint_distance_full_all'
+        'hsr_distance_full_all', 'sprint_distance_full_all', 'minutes_full_all'
     ]:
-        d[c] = pd.to_numeric(d[c], errors='coerce').fillna(0)
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors='coerce').fillna(0)
 
     d["sum_b345"] = d["running_distance_full_all"] + d["hsr_distance_full_all"] + d["sprint_distance_full_all"]
-    d["pct_b345"] = np.where(d["total_distance_full_all"] > 0, (d["sum_b345"] / d["total_distance_full_all"]) * 100.0, 0.0)
+    d["pct_b345"] = np.where(d["total_distance_full_all"] > 0,
+                             (d["sum_b345"] / d["total_distance_full_all"]) * 100.0, 0.0)
     return d
 
 
 def render_team_vis2_b345_stacked_simple(df_team, team_name):
-    """Visualización 2 — HID (B3/B4/B5) apilado, orden por suma, sin % ni suma"""
+    """
+    Visualización 2 — HID (B3/B4/B5) apilado, orden por suma.
+    Etiquetas eje Y: 'Jugador | POS | MIN min'
+    """
     d = _prep_b345(df_team)
     if d is None:
         return
 
     d = d.sort_values("sum_b345", ascending=False).reset_index(drop=True)
 
-    players = d['player_short_name'].tolist()
+    # Etiquetas con posición/minutos
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     b3 = d['running_distance_full_all'].to_numpy()
     b4 = d['hsr_distance_full_all'].to_numpy()
     b5 = d['sprint_distance_full_all'].to_numpy()
 
-    y = np.arange(len(players))
-    height = max(6, len(players) * 0.08)
+    y = np.arange(len(labels))
+    height = max(6, len(labels) * 0.08)
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
     left = np.zeros_like(b3, dtype=float)
-    bars = []
-    bars.append(ax.barh(y, b3, left=left, color=B3_COLOR, alpha=0.95, edgecolor='none', label="B3: 15–20 km/h"))
-    left = left + b3
-    bars.append(ax.barh(y, b4, left=left, color=B4_COLOR, alpha=0.95, edgecolor='none', label="B4: 20–25 km/h"))
-    left = left + b4
-    b5_bars = ax.barh(y, b5, left=left, color=B5_COLOR, alpha=0.95, edgecolor='none', label="B5: > 25 km/h")
+    b3b = ax.barh(y, b3, left=left, color=B3_COLOR, alpha=0.95, edgecolor='none', label="B3: 15–20 km/h"); left += b3
+    b4b = ax.barh(y, b4, left=left, color=B4_COLOR, alpha=0.95, edgecolor='none', label="B4: 20–25 km/h"); left += b4
+    b5b = ax.barh(y, b5, left=left, color=B5_COLOR, alpha=0.95, edgecolor='none', label="B5: > 25 km/h")
 
     ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Distancia (m)")
     ax.set_title(f"{team_name} — HID (B3/B4/B5)", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()  # mayor arriba
+    ax.invert_yaxis()
 
-    # Etiquetas: B3/B4 al centro
-    for arr, container in zip([b3, b4], bars):
+    # Etiquetas internas (B3/B4) y B5 afuera a la derecha
+    for arr, container in zip([b3, b4], [b3b, b4b]):
         for rect, width in zip(container.patches, arr):
             if width <= 0:
                 continue
@@ -267,10 +360,8 @@ def render_team_vis2_b345_stacked_simple(df_team, team_name):
                     color='white', fontweight='bold', fontsize=9,
                     path_effects=[pe.withStroke(linewidth=1, foreground="black")])
 
-    # Etiquetas: B5 afuera a la derecha
-    for rect, width in zip(b5_bars.patches, b5):
-        if width <= 0:
-            continue
+    for rect, width in zip(b5b.patches, b5):
+        if width <= 0: continue
         yi = rect.get_y() + rect.get_height() / 2.0
         x1 = rect.get_x() + rect.get_width()
         ax.text(x1 + 15, yi, f"{width:,.0f} m", va='center', ha='left',
@@ -283,20 +374,28 @@ def render_team_vis2_b345_stacked_simple(df_team, team_name):
 
 
 def render_team_vis3_b345_sum_pct(df_team, team_name):
-    """Visualización 3 — Barra con suma HID y % del total, orden por suma"""
+    """
+    Visualización 3 — Barra con suma HID y % del total, orden por suma.
+    Etiquetas eje Y: 'Jugador | POS | MIN min'
+    """
     d = _prep_b345(df_team)
     if d is None:
         return
 
     d = d.sort_values("sum_b345", ascending=False).reset_index(drop=True)
 
-    players = d['player_short_name'].tolist()
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     total = d['total_distance_full_all'].to_numpy()
     sum_b = d['sum_b345'].to_numpy()
     pct_b = np.where(total > 0, (sum_b / total) * 100.0, 0.0)
 
-    y = np.arange(len(players))
-    height = max(6, len(players) * 0.08)
+    y = np.arange(len(labels))
+    height = max(6, len(labels) * 0.08)
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
@@ -306,7 +405,7 @@ def render_team_vis3_b345_sum_pct(df_team, team_name):
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Distancia (m)")
     ax.set_title(f"{team_name} — Suma de HID (B3+B4+B5) y % del total", fontsize=14, pad=12, fontweight='bold')
     ax.invert_yaxis()  # mayor arriba
@@ -344,41 +443,50 @@ def _prep_counts(df_team: pd.DataFrame, cols: list, sum_col_name: str) -> pd.Dat
     if not all(c in df_team.columns for c in need):
         return None
 
-    d = df_team[need].copy()
+    d = df_team[need + [c for c in ['position', 'position_short', 'minutes_full_all'] if c in df_team.columns]].copy()
     for c in cols:
         d[c] = pd.to_numeric(d[c], errors='coerce').fillna(0)
+    if 'minutes_full_all' in d.columns:
+        d['minutes_full_all'] = pd.to_numeric(d['minutes_full_all'], errors='coerce').fillna(0)
     d[sum_col_name] = d[cols[0]] + d[cols[1]]
-    # Orden de mayor a menor por la suma
     d = d.sort_values(sum_col_name, ascending=False).reset_index(drop=True)
     return d
 
 
 def render_team_vis4_accels(df_team, team_name):
-    """Visualización 4 — Aceleraciones (medias + altas) apiladas, orden por suma"""
+    """
+    Visualización 4 — Aceleraciones (medias + altas) apiladas, orden por suma.
+    Etiquetas eje Y: 'Jugador | POS | MIN min'
+    """
     cols = ['medaccel_count_full_all', 'highaccel_count_full_all']
     d = _prep_counts(df_team, cols, 'sum_acc')
     if d is None:
         return
 
-    players = d['player_short_name'].tolist()
+    # Etiquetas
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     med = d[cols[0]].to_numpy()
     high = d[cols[1]].to_numpy()
 
-    y = np.arange(len(players))
-    height = max(5.5, len(players) * 0.06)
+    y = np.arange(len(labels))
+    height = max(5.5, len(labels) * 0.06)
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
     left = np.zeros_like(med, dtype=float)
-    b_med  = ax.barh(y, med,  left=left, color=ACC_MED_COLOR,  alpha=0.95, edgecolor='none', label="Aceleraciones medias")
-    left   = left + med
+    b_med  = ax.barh(y, med,  left=left, color=ACC_MED_COLOR,  alpha=0.95, edgecolor='none', label="Aceleraciones medias"); left += med
     b_high = ax.barh(y, high, left=left, color=ACC_HIGH_COLOR, alpha=0.95, edgecolor='none', label="Aceleraciones altas")
 
     ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Cantidad")
     ax.set_title(f"{team_name} — Aceleraciones (medias + altas)", fontsize=14, pad=20, fontweight='bold')
     ax.text(0.5, 1.03,
@@ -409,31 +517,39 @@ def render_team_vis4_accels(df_team, team_name):
 
 
 def render_team_vis5_decels(df_team, team_name):
-    """Visualización 5 — Desaceleraciones (medias + altas) apiladas, orden por suma"""
+    """
+    Visualización 5 — Desaceleraciones (medias + altas) apiladas, orden por suma.
+    Etiquetas eje Y: 'Jugador | POS | MIN min'
+    """
     cols = ['meddecel_count_full_all', 'highdecel_count_full_all']
     d = _prep_counts(df_team, cols, 'sum_dec')
     if d is None:
         return
 
-    players = d['player_short_name'].tolist()
+    # Etiquetas
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     med = d[cols[0]].to_numpy()
     high = d[cols[1]].to_numpy()
 
-    y = np.arange(len(players))
-    height = max(5.5, len(players) * 0.06)
+    y = np.arange(len(labels))
+    height = max(5.5, len(labels) * 0.06)
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
     left = np.zeros_like(med, dtype=float)
-    b_med  = ax.barh(y, med,  left=left, color=DEC_MED_COLOR,  alpha=0.95, edgecolor='none', label="Desaceleraciones medias")
-    left   = left + med
+    b_med  = ax.barh(y, med,  left=left, color=DEC_MED_COLOR,  alpha=0.95, edgecolor='none', label="Desaceleraciones medias"); left += med
     b_high = ax.barh(y, high, left=left, color=DEC_HIGH_COLOR, alpha=0.95, edgecolor='none', label="Desaceleraciones altas")
 
     ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Cantidad")
     ax.set_title(f"{team_name} — Desaceleraciones (medias + altas)", fontsize=14, pad=20, fontweight='bold')
     ax.text(0.5, 1.03,
@@ -469,6 +585,7 @@ def render_team_vis6_expl_to_hsr(df_team, team_name):
     - Barra por jugador: explacceltohsr_count_full_all (conteo)
     - En la base (inicio de barra): timetohsr (s)
     - Orden: mayor conteo arriba
+    - Etiquetas eje Y: 'Jugador | POS | MIN min'
     """
     COUNT_COL = 'explacceltohsr_count_full_all'
     TIME_COL  = 'timetohsr'
@@ -476,25 +593,31 @@ def render_team_vis6_expl_to_hsr(df_team, team_name):
     if not all(c in df_team.columns for c in need):
         return
 
-    d = df_team[need].copy()
+    d = df_team[need + [c for c in ['position', 'position_short', 'minutes_full_all'] if c in df_team.columns]].copy()
     d[COUNT_COL] = pd.to_numeric(d[COUNT_COL], errors='coerce').fillna(0)
     d[TIME_COL]  = pd.to_numeric(d[TIME_COL],  errors='coerce')
 
     # Orden por conteo (mayor arriba)
     d = d.sort_values(COUNT_COL, ascending=False).reset_index(drop=True)
 
-    players = d['player_short_name'].tolist()
+    # Etiquetas
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     counts  = d[COUNT_COL].to_numpy()
     times   = d[TIME_COL].to_numpy()
 
-    y = np.arange(len(players))
-    height = max(6, len(players) * 0.08)  # mismo alto que otras vis
+    y = np.arange(len(labels))
+    height = max(6, len(labels) * 0.08)  # mismo alto que otras vis
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
     bars = ax.barh(y, counts, color=B4_COLOR, alpha=0.95, edgecolor='none')
 
-    # --- Escala y ejes ---
+    # Escala y ejes con margen derecho para números
     max_c = float(np.nanmax(counts)) if len(counts) else 0.0
     right_pad = max(2.0, max_c * 0.12)   # margen para el número al final
     ax.set_xlim(0, max_c + right_pad)
@@ -503,31 +626,27 @@ def render_team_vis6_expl_to_hsr(df_team, team_name):
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Cantidad")
     ax.set_title(f"{team_name} — Aceleraciones explosivas a HSR (B4)", fontsize=14, pad=14, fontweight='bold')
     ax.invert_yaxis()
 
-    # --- Segundos en la base (inicio de barra) ---
-    # offset proporcional al ancho del eje para que no “salte” ni se repita visualmente
+    # Segundos en la base (inicio de barra)
     x0, x1 = ax.get_xlim()
     base_x = x0 + 0.015 * (x1 - x0)  # 1.5% del ancho del eje
     for yi, t in enumerate(times):
-        if pd.isna(t):
-            txt = "–"
-        else:
-            txt = f"{t:.1f} s"
+        txt = "–" if pd.isna(t) else f"{t:.1f} s"
         ax.text(base_x, yi, txt, va='center', ha='left',
                 color='white', fontsize=10, fontweight='bold',
                 path_effects=[pe.withStroke(linewidth=1, foreground="black")], zorder=3)
 
-    # --- Conteo pegado al final (siempre afuera) ---
+    # Conteo pegado al final (afuera)
     for rect, c in zip(bars.patches, counts):
         if c <= 0:
             continue
         yi = rect.get_y() + rect.get_height() / 2.0
         x_end = rect.get_x() + rect.get_width()
-        ax.text(x_end + 0.01 * (x1 - x0), yi, f"{int(c)}",  # 3% del ancho del eje
+        ax.text(x_end + 0.01 * (x1 - x0), yi, f"{int(c)}",  # 1% del ancho del eje
                 va='center', ha='left', color='black', fontweight='bold', fontsize=10)
 
     plt.tight_layout()
@@ -541,6 +660,7 @@ def render_team_vis7_expl_to_sprint(df_team, team_name):
     - Barra por jugador: explacceltosprint_count_full_all (conteo)
     - En la base (inicio de barra): timetosprint (s)
     - Orden: mayor conteo arriba
+    - Etiquetas eje Y: 'Jugador | POS | MIN min'
     """
     COUNT_COL = 'explacceltosprint_count_full_all'
     TIME_COL  = 'timetosprint'
@@ -548,24 +668,30 @@ def render_team_vis7_expl_to_sprint(df_team, team_name):
     if not all(c in df_team.columns for c in need):
         return
 
-    d = df_team[need].copy()
+    d = df_team[need + [c for c in ['position', 'position_short', 'minutes_full_all'] if c in df_team.columns]].copy()
     d[COUNT_COL] = pd.to_numeric(d[COUNT_COL], errors='coerce').fillna(0)
     d[TIME_COL]  = pd.to_numeric(d[TIME_COL],  errors='coerce')
 
     d = d.sort_values(COUNT_COL, ascending=False).reset_index(drop=True)
 
-    players = d['player_short_name'].tolist()
+    # Etiquetas
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     counts  = d[COUNT_COL].to_numpy()
     times   = d[TIME_COL].to_numpy()
 
-    y = np.arange(len(players))
-    height = max(6, len(players) * 0.08)  # mismo alto que otras vis
+    y = np.arange(len(labels))
+    height = max(6, len(labels) * 0.08)  # mismo alto que otras vis
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
     bars = ax.barh(y, counts, color=B5_COLOR, alpha=0.95, edgecolor='none')
 
-    # --- Escala y ejes ---
+    # Escala y ejes
     max_c = float(np.nanmax(counts)) if len(counts) else 0.0
     right_pad = max(2.0, max_c * 0.12)
     ax.set_xlim(0, max_c + right_pad)
@@ -574,24 +700,21 @@ def render_team_vis7_expl_to_sprint(df_team, team_name):
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Cantidad")
     ax.set_title(f"{team_name} — Aceleración explosiva a sprint (B5)", fontsize=14, pad=14, fontweight='bold')
     ax.invert_yaxis()
 
-    # --- Segundos en la base (inicio de barra) ---
+    # Segundos en la base (inicio de barra)
     x0, x1 = ax.get_xlim()
     base_x = x0 + 0.015 * (x1 - x0)  # 1.5% del ancho del eje
     for yi, t in enumerate(times):
-        if pd.isna(t):
-            txt = "–"
-        else:
-            txt = f"{t:.1f} s"
+        txt = "–" if pd.isna(t) else f"{t:.1f} s"
         ax.text(base_x, yi, txt, va='center', ha='left',
                 color='white', fontsize=10, fontweight='bold',
                 path_effects=[pe.withStroke(linewidth=1, foreground="black")], zorder=3)
 
-    # --- Conteo pegado al final (siempre afuera) ---
+    # Conteo pegado al final (afuera)
     for rect, c in zip(bars.patches, counts):
         if c <= 0:
             continue
@@ -604,30 +727,39 @@ def render_team_vis7_expl_to_sprint(df_team, team_name):
     st.pyplot(fig)
     plt.close(fig)
 
+
 def render_team_vis8_psv99(df_team, team_name):
     """
     Visualización 8 — PSV99 | Velocidad máxima
     - Una barra por jugador con psv99 (km/h)
     - Etiqueta al final de la barra (adentro), con sufijo ' km/h'
     - Orden: mayor velocidad arriba
+    - Etiquetas eje Y: 'Jugador | POS | MIN min'
     """
     COL = 'psv99'
     need = ['player_short_name', COL]
     if not all(c in df_team.columns for c in need):
         return
 
-    d = df_team[need].copy()
-    d[COL] = pd.to_numeric(d[COL], errors='coerce')
-    d = d.fillna({COL: 0})
+    d = df_team[need + [c for c in ['position', 'position_short', 'minutes_full_all'] if c in df_team.columns]].copy()
+    d[COL] = pd.to_numeric(d[COL], errors='coerce').fillna(0)
+    if 'minutes_full_all' in d.columns:
+        d['minutes_full_all'] = pd.to_numeric(d['minutes_full_all'], errors='coerce')
 
     # Orden por velocidad (mayor arriba)
     d = d.sort_values(COL, ascending=False).reset_index(drop=True)
 
-    players = d['player_short_name'].tolist()
+    # Etiquetas
+    if 'position' not in d.columns: d['position'] = np.nan
+    if 'position_short' not in d.columns: d['position_short'] = np.nan
+    if 'minutes_full_all' not in d.columns: d['minutes_full_all'] = np.nan
+    d['row_label'] = d.apply(lambda r: _build_player_row_label(r['player_short_name'], _pos_text(r), _mins_text(r)), axis=1)
+
+    labels = d['row_label'].tolist()
     speeds  = d[COL].to_numpy()
 
-    y = np.arange(len(players))
-    height = max(6, len(players) * 0.08)
+    y = np.arange(len(labels))
+    height = max(6, len(labels) * 0.08)
     fig, ax = plt.subplots(figsize=(13, height), dpi=120)
     _set_font_family()
 
@@ -642,7 +774,7 @@ def render_team_vis8_psv99(df_team, team_name):
     ax.grid(axis='x', linestyle=':', alpha=0.3)
     ax.set_axisbelow(True)
     ax.set_yticks(y)
-    ax.set_yticklabels(players)
+    ax.set_yticklabels(labels)
     ax.set_xlabel("Velocidad (km/h)")
     ax.set_title(f"{team_name} — PSV99 | Velocidad máxima", fontsize=14, pad=12, fontweight='bold')
     ax.invert_yaxis()  # mayor arriba
@@ -653,7 +785,6 @@ def render_team_vis8_psv99(df_team, team_name):
             continue
         yi = rect.get_y() + rect.get_height() / 2.0
         x_end = rect.get_x() + rect.get_width()
-        # un pequeño offset hacia adentro para que quede "pegado" al final pero dentro
         x_label = x_end - 0.02 * (ax.get_xlim()[1] - ax.get_xlim()[0])
         ax.text(x_label, yi, f"{v:.1f} km/h",
                 va='center', ha='right',
@@ -669,7 +800,7 @@ def render_team_vis8_psv99(df_team, team_name):
 # TABLAS POR EQUIPO
 # =========================
 phys_cols = [
-    'player_short_name', 'position', 'position_group',
+    'player_short_name', 'position', 'position_short', 'position_group',
     'minutes_full_all', 'physical_check_passed', 'total_distance_full_all',
     'total_metersperminute_full_all', 'running_distance_full_all',
     'hsr_distance_full_all', 'hsr_count_full_all',
@@ -701,7 +832,7 @@ for t in teams:
     t_id, t_name = t["team_id"], t["team_name"]
     df_team = df_match[df_match["team_id"] == t_id].copy()
 
-    # Vis 1: total + m/min (mayor total arriba)
+    # Vis 1: m/min (barras) + distancia total en la base (orden por m/min)
     render_team_vis1_total_vs_mpm(df_team, t_name)
 
     # Vis 2: stacked simple B3/B4/B5 (orden por suma, B5 etiqueta a la derecha)
@@ -725,8 +856,7 @@ for t in teams:
     # Vis 8: PSV99 | Velocidad máxima
     render_team_vis8_psv99(df_team, t_name)
 
-
     # Tabla
     st.markdown(f"### {t_name}")
-    df_team_table = order_team_table(df_team[phys_cols].copy())
+    df_team_table = order_team_table(df_team[[c for c in phys_cols if c in df_team.columns]].copy())
     st.dataframe(df_team_table, use_container_width=True)
