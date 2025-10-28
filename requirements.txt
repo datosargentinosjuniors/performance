@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+datetime
+io
+matplotlib
+matplotlib.pyplot
+skillcorner.client
+skillcorner
