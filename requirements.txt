@@ -1,8 +1,5 @@
-streamlit
-pandas
-numpy
-datetime
-io
-matplotlib
-matplotlib.pyplot
-skillcorner
+streamlit>=1.32.0
+pandas>=1.4.0
+numpy>=1.23.0
+matplotlib>=3.7.1
+skillcorner>=0.8.9
