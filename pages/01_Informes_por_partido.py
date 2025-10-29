@@ -38,7 +38,7 @@ DEC_HIGH_COLOR = "#FB0B0E"  # alto  (rojo AAAJ)
 # =========================
 col1, col2 = st.columns([6, 1])
 with col2:
-    if st.button("🔄 Actualizar datos ahora"):
+    if st.button("🔄 Actualizar datos"):
         try:
             fetch_physical.clear()
         except Exception:
