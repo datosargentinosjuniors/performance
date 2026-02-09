@@ -1,4 +1,4 @@
-# appstreamlit_players_compare.py
+# appstreamlit_players_compare_2selectors.py
 # -*- coding: utf-8 -*-
 
 import streamlit as st
@@ -10,8 +10,8 @@ from io import BytesIO
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="SkillCorner — Comparativa física", layout="wide")
-st.title("🏃‍♂️ Comparador de futbolistas")
+st.set_page_config(page_title="SkillCorner — Comparativa física (2 competiciones)", layout="wide")
+st.title("🏃‍♂️ SkillCorner — Comparativa de jugadores (A vs B) con 2 competiciones/ediciones")
 
 # =========================
 # CATÁLOGO (IDs fijos)
@@ -96,7 +96,6 @@ METRIC_ALIASES_ES = {
     "timetosprintpostcod": "Tiempo a un sprint (B5) post cambio de ritmo",
 }
 
-# Orden EXACTO como tu captura 2 (por alias en español)
 ROW_ORDER_ES = [
     "Distancia total",
     "Metros por minuto",
@@ -122,7 +121,7 @@ ROW_ORDER_ES = [
 ]
 
 # =========================
-# HELPERS: resp -> DataFrame
+# HELPERS
 # =========================
 def _resp_to_df(resp) -> pd.DataFrame:
     if isinstance(resp, list):
@@ -150,9 +149,6 @@ def _coerce_types(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-# =========================
-# FETCH: 1 edición (cache diario)
-# =========================
 @st.cache_data(show_spinner=True)
 def fetch_physical_one(competition_id: int, competition_edition_id: int, cache_date: str) -> pd.DataFrame:
     from skillcorner.client import SkillcornerClient
@@ -167,17 +163,11 @@ def fetch_physical_one(competition_id: int, competition_edition_id: int, cache_d
 
     df = _resp_to_df(resp)
     df = _coerce_types(df)
-
-    # metadata útil
     df["competition_id"] = competition_id
     df["competition_edition_id"] = competition_edition_id
-
     return df
 
 def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
-    """
-    1 fila por player_id + team_id (para evitar mezclar traspasos dentro de la edición).
-    """
     if df_all.empty or "player_id" not in df_all.columns:
         return pd.DataFrame()
 
@@ -194,9 +184,8 @@ def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
     else:
         d["minutes_full_all"] = 0
 
-    gcols = [c for c in ["player_id", "team_id"] if c in d.columns]
     players = (
-        d.groupby(gcols, as_index=False)
+        d.groupby(["player_id", "team_id"], as_index=False)
          .agg({
              "player_short_name": "first" if "player_short_name" in d.columns else "first",
              "player_name": "first" if "player_name" in d.columns else "first",
@@ -210,7 +199,6 @@ def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
         ascending=[False, True, True]
     ).reset_index(drop=True)
 
-    # etiqueta linda para selectbox
     players["label"] = (
         players["player_short_name"].fillna(players["player_name"]).fillna("—").astype(str)
         + " — " + players["team_name"].fillna("—").astype(str)
@@ -230,9 +218,6 @@ def _filter_player_rows(df_all: pd.DataFrame, player_id: int, team_id: int, min_
     return d
 
 def _compute_means_for_player(d: pd.DataFrame) -> dict:
-    """
-    Promedia SOLO métricas con alias. Si la métrica no existe, queda NaN.
-    """
     out = {}
     for metric_key in METRIC_ALIASES_ES.keys():
         if metric_key in d.columns:
@@ -251,22 +236,15 @@ def _build_comparison_table(means_a: dict, means_b: dict, label_a: str, label_b:
         })
     df_cmp = pd.DataFrame(rows)
 
-    # redondeo a 2 decimales
     for c in [label_a, label_b]:
         df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").round(2)
 
-    # orden por tu lista
     order_map = {name: i for i, name in enumerate(ROW_ORDER_ES)}
     df_cmp["_ord"] = df_cmp["Métrica"].map(order_map).fillna(9999).astype(int)
     df_cmp = df_cmp.sort_values("_ord").drop(columns=["_ord"]).reset_index(drop=True)
-
-    # (extra) si por alguna razón aparece algo fuera del orden, lo deja al final
     return df_cmp
 
 def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
-    """
-    Sin colores de fondo. Solo deja en negrita el mayor por fila.
-    """
     def bold_row(row):
         a = row[col_a]
         b = row[col_b]
@@ -281,7 +259,6 @@ def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
         except Exception:
             b_num = np.nan
 
-        # índices
         idx_a = row.index.get_loc(col_a)
         idx_b = row.index.get_loc(col_b)
 
@@ -290,7 +267,6 @@ def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
                 styles[idx_a] = "font-weight: 700;"
             elif b_num > a_num:
                 styles[idx_b] = "font-weight: 700;"
-            # empate: nada
         elif pd.notna(a_num) and pd.isna(b_num):
             styles[idx_a] = "font-weight: 700;"
         elif pd.isna(a_num) and pd.notna(b_num):
@@ -300,6 +276,11 @@ def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
     sty = df_cmp.style.apply(bold_row, axis=1)
     sty = sty.format({col_a: "{:.2f}", col_b: "{:.2f}"}, na_rep="—")
     return sty
+
+def _mins_sum(d: pd.DataFrame) -> float:
+    if d.empty or "minutes_full_all" not in d.columns:
+        return 0.0
+    return float(pd.to_numeric(d["minutes_full_all"], errors="coerce").fillna(0).sum())
 
 # =========================
 # BOTÓN: limpiar cache
@@ -314,112 +295,116 @@ with c2:
         st.toast("Cache limpiada. Re-descargando…")
         st.rerun()
 
-# =========================
-# UI: selects (competición + edición)
-# =========================
-col1, col2, col3, col4 = st.columns([1.2, 1.8, 1.2, 1], vertical_alignment="bottom")
-
-with col1:
-    country = st.selectbox("País/Liga", list(COMPETITION_CATALOG.keys()), index=0)
-
-with col2:
-    comp_label = st.selectbox("Competencia", list(COMPETITION_CATALOG[country].keys()), index=0)
-
-info = COMPETITION_CATALOG[country][comp_label]
-competition_id = info["competition_id"]
-
-with col3:
-    edition_label = st.selectbox("Edición", list(info["editions"].keys()), index=0)
-
-competition_edition_id = info["editions"][edition_label]
-
-with col4:
-    do_fetch = st.button("📥 Descargar")
-
-st.caption(f"Seleccionado: competition_id={competition_id} | competition_edition_id={competition_edition_id}")
+today_key = date.today().isoformat()
 
 # =========================
-# EXEC: download + select players + filters + compare
+# UI: DOS SELECTORES (A y B)
+# =========================
+st.subheader("Selección de competición/edición para los jugadores a comparar (A y B)")
+
+left, right = st.columns(2, vertical_alignment="top")
+
+with left:
+    st.markdown("### Jugador A — Competición")
+    a_country = st.selectbox("País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="a_country")
+    a_comp_label = st.selectbox("Competencia", list(COMPETITION_CATALOG[a_country].keys()), index=0, key="a_comp")
+    a_info = COMPETITION_CATALOG[a_country][a_comp_label]
+    a_competition_id = a_info["competition_id"]
+    a_edition_label = st.selectbox("Edición", list(a_info["editions"].keys()), index=0, key="a_edition")
+    a_competition_edition_id = a_info["editions"][a_edition_label]
+    st.caption(f"A: competition_id={a_competition_id} | competition_edition_id={a_competition_edition_id}")
+
+with right:
+    st.markdown("### Jugador B — Competición")
+    b_country = st.selectbox("País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="b_country")
+    b_comp_label = st.selectbox("Competencia", list(COMPETITION_CATALOG[b_country].keys()), index=0, key="b_comp")
+    b_info = COMPETITION_CATALOG[b_country][b_comp_label]
+    b_competition_id = b_info["competition_id"]
+    b_edition_label = st.selectbox("Edición", list(b_info["editions"].keys()), index=0, key="b_edition")
+    b_competition_edition_id = b_info["editions"][b_edition_label]
+    st.caption(f"B: competition_id={b_competition_id} | competition_edition_id={b_competition_edition_id}")
+
+do_fetch = st.button("📥 Cargar información")
+
+# =========================
+# EXEC: descargar dos dfs + comparar
 # =========================
 if do_fetch:
-    today_key = date.today().isoformat()
-    with st.spinner("Descargando /physical…"):
-        df_all = fetch_physical_one(competition_id, competition_edition_id, cache_date=today_key)
+    with st.spinner("Descargando para Jugador A…"):
+        df_all_a = fetch_physical_one(a_competition_id, a_competition_edition_id, cache_date=today_key)
 
-    if df_all.empty:
-        st.error("La API devolvió vacío para esta edición.")
+    with st.spinner("Descargando para Jugador B…"):
+        df_all_b = fetch_physical_one(b_competition_id, b_competition_edition_id, cache_date=today_key)
+
+    if df_all_a.empty:
+        st.error("A: La API devolvió vacío para esta edición.")
+        st.stop()
+    if df_all_b.empty:
+        st.error("B: La API devolvió vacío para esta edición.")
         st.stop()
 
-    df_players = build_players_from_df_all(df_all)
-    if df_players.empty:
-        st.error("No pude construir el listado de jugadores (faltan columnas clave).")
+    df_players_a = build_players_from_df_all(df_all_a)
+    df_players_b = build_players_from_df_all(df_all_b)
+
+    if df_players_a.empty:
+        st.error("A: No pude construir el listado de jugadores (faltan columnas clave).")
+        st.stop()
+    if df_players_b.empty:
+        st.error("B: No pude construir el listado de jugadores (faltan columnas clave).")
         st.stop()
 
-    st.success(f"Listo ✅ Entradas: {len(df_all):,} | Jugadores únicos (player+team): {len(df_players):,}")
+    st.success(
+        f"Listo ✅ "
+        f"A: entradas {len(df_all_a):,} | jugadores {len(df_players_a):,}   ·   "
+        f"B: entradas {len(df_all_b):,} | jugadores {len(df_players_b):,}"
+    )
 
     st.divider()
-    st.subheader("Elegí 2 jugadores (sin filtrar por puesto)")
+    st.subheader("Elegí a los dos jugadores (A y B)")
 
-    # Selects: 2 jugadores (player_id + team_id)
-    p1_label = st.selectbox("Jugador A", df_players["label"].tolist(), index=0)
-    p2_label = st.selectbox("Jugador B", df_players["label"].tolist(), index=min(1, len(df_players)-1))
+    colL, colR = st.columns(2, vertical_alignment="top")
 
-    p1_row = df_players.loc[df_players["label"] == p1_label].iloc[0]
-    p2_row = df_players.loc[df_players["label"] == p2_label].iloc[0]
+    with colL:
+        p1_label = st.selectbox("Jugador A", df_players_a["label"].tolist(), index=0, key="p1_label")
+        p1_row = df_players_a.loc[df_players_a["label"] == p1_label].iloc[0]
+        player_a_id, team_a_id = int(p1_row["player_id"]), int(p1_row["team_id"])
+        minA, maxA = st.slider(
+            "Jugador A — Min/Max minutos por partido",
+            min_value=0, max_value=130, value=(60, 130), step=1, key="mins_a"
+        )
 
-    player_a_id, team_a_id = int(p1_row["player_id"]), int(p1_row["team_id"])
-    player_b_id, team_b_id = int(p2_row["player_id"]), int(p2_row["team_id"])
+    with colR:
+        p2_label = st.selectbox("Jugador B", df_players_b["label"].tolist(), index=0, key="p2_label")
+        p2_row = df_players_b.loc[df_players_b["label"] == p2_label].iloc[0]
+        player_b_id, team_b_id = int(p2_row["player_id"]), int(p2_row["team_id"])
+        minB, maxB = st.slider(
+            "Jugador B — Min/Max minutos por partido",
+            min_value=0, max_value=130, value=(60, 130), step=1, key="mins_b"
+        )
 
-    # Rangos de minutos por partido (independientes por jugador)
-    st.divider()
-    st.subheader("Filtro por minutos por partido (rango)")
-
-    # límites sugeridos
-    min_lim = 0
-    max_lim = 130
-
-    colA, colB = st.columns(2)
-    with colA:
-        minA, maxA = st.slider("Jugador A — Min/Max minutos por partido",
-                               min_value=min_lim, max_value=max_lim, value=(60, 130), step=1)
-    with colB:
-        minB, maxB = st.slider("Jugador B — Min/Max minutos por partido",
-                               min_value=min_lim, max_value=max_lim, value=(60, 130), step=1)
-
-    # Filtrar filas
-    dA = _filter_player_rows(df_all, player_a_id, team_a_id, minA, maxA)
-    dB = _filter_player_rows(df_all, player_b_id, team_b_id, minB, maxB)
+    # Filtrar filas por jugador + rango mins (cada uno en su df)
+    dA = _filter_player_rows(df_all_a, player_a_id, team_a_id, minA, maxA)
+    dB = _filter_player_rows(df_all_b, player_b_id, team_b_id, minB, maxB)
 
     if dA.empty:
         st.warning("Jugador A: no hay filas que cumplan el rango de minutos elegido.")
     if dB.empty:
         st.warning("Jugador B: no hay filas que cumplan el rango de minutos elegido.")
 
-    # Calcular promedios (solo métricas con alias)
     meansA = _compute_means_for_player(dA)
     meansB = _compute_means_for_player(dB)
 
-    # Etiquetas columnas (cortas)
     col_name_a = f"A: {p1_row['player_short_name']} ({p1_row['team_name']})"
     col_name_b = f"B: {p2_row['player_short_name']} ({p2_row['team_name']})"
 
-    # Tabla comparativa
     df_cmp = _build_comparison_table(meansA, meansB, col_name_a, col_name_b)
 
     st.divider()
     st.subheader("Tabla comparativa (promedios)")
+    st.dataframe(_styler_bold_max(df_cmp, col_name_a, col_name_b), use_container_width=True, height=720)
 
-    sty = _styler_bold_max(df_cmp, col_name_a, col_name_b)
-    st.dataframe(sty, use_container_width=True, height=720)
-
-    # Resumen abajo (mins totales + partidos)
     st.divider()
     st.subheader("Resumen de la muestra")
-
-    def _mins_sum(d):
-        if d.empty or "minutes_full_all" not in d.columns:
-            return 0.0
-        return float(pd.to_numeric(d["minutes_full_all"], errors="coerce").fillna(0).sum())
 
     sumA = round(_mins_sum(dA), 0)
     sumB = round(_mins_sum(dB), 0)
@@ -429,12 +414,13 @@ if do_fetch:
         st.markdown(f"**Jugador A:** {p1_label}")
         st.write(f"Partidos que cumplieron el rango: **{len(dA):,}**")
         st.write(f"Minutos totales (muestra): **{int(sumA):,}**")
+        st.caption(f"A: {a_country} · {a_comp_label} · {a_edition_label}")
     with c2:
         st.markdown(f"**Jugador B:** {p2_label}")
         st.write(f"Partidos que cumplieron el rango: **{len(dB):,}**")
         st.write(f"Minutos totales (muestra): **{int(sumB):,}**")
+        st.caption(f"B: {b_country} · {b_comp_label} · {b_edition_label}")
 
-    # (Opcional) debug raw
     with st.expander("Ver filas raw filtradas (debug)", expanded=False):
         st.write("Jugador A — filas filtradas")
         st.dataframe(dA, use_container_width=True, height=260)
