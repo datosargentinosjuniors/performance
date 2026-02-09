@@ -121,6 +121,13 @@ ROW_ORDER_ES = [
 ]
 
 # =========================
+# SESSION STATE INIT
+# =========================
+for k in ["df_all_a", "df_all_b", "df_players_a", "df_players_b", "meta_a", "meta_b"]:
+    if k not in st.session_state:
+        st.session_state[k] = None
+
+# =========================
 # HELPERS
 # =========================
 def _resp_to_df(resp) -> pd.DataFrame:
@@ -133,34 +140,26 @@ def _resp_to_df(resp) -> pd.DataFrame:
 def _coerce_types(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-
     if "match_date" in df.columns:
         df["match_date"] = pd.to_datetime(df["match_date"], errors="coerce").dt.date
-
     for c in ["match_id", "team_id", "player_id"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
-
     if "minutes_full_all" in df.columns:
         df["minutes_full_all"] = pd.to_numeric(df["minutes_full_all"], errors="coerce")
-
     if "player_short_name" in df.columns and "player_name" in df.columns:
         df["player_short_name"] = df["player_short_name"].fillna(df["player_name"])
-
     return df
 
 @st.cache_data(show_spinner=True)
 def fetch_physical_one(competition_id: int, competition_edition_id: int, cache_date: str) -> pd.DataFrame:
     from skillcorner.client import SkillcornerClient
-
     client = SkillcornerClient(
         username=st.secrets["SKILLCORNER_USERNAME"],
         password=st.secrets["SKILLCORNER_PASSWORD"],
     )
-
     params = {"competition": [competition_id], "competition_edition": [competition_edition_id]}
     resp = client.get_physical(params=params, raise_for_status=True)
-
     df = _resp_to_df(resp)
     df = _coerce_types(df)
     df["competition_id"] = competition_id
@@ -168,15 +167,10 @@ def fetch_physical_one(competition_id: int, competition_edition_id: int, cache_d
     return df
 
 def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
-    if df_all.empty or "player_id" not in df_all.columns:
+    if df_all is None or df_all.empty or "player_id" not in df_all.columns:
         return pd.DataFrame()
 
-    keep = [c for c in [
-        "player_id", "player_short_name", "player_name",
-        "team_id", "team_name",
-        "minutes_full_all"
-    ] if c in df_all.columns]
-
+    keep = [c for c in ["player_id", "player_short_name", "player_name", "team_id", "team_name", "minutes_full_all"] if c in df_all.columns]
     d = df_all[keep].copy()
 
     if "minutes_full_all" in d.columns:
@@ -194,11 +188,7 @@ def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
          })
     )
 
-    players = players.sort_values(
-        ["minutes_full_all", "team_name", "player_short_name"],
-        ascending=[False, True, True]
-    ).reset_index(drop=True)
-
+    players = players.sort_values(["minutes_full_all", "team_name", "player_short_name"], ascending=[False, True, True]).reset_index(drop=True)
     players["label"] = (
         players["player_short_name"].fillna(players["player_name"]).fillna("—").astype(str)
         + " — " + players["team_name"].fillna("—").astype(str)
@@ -208,11 +198,7 @@ def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
 
 def _filter_player_rows(df_all: pd.DataFrame, player_id: int, team_id: int, min_mp: float, max_mp: float) -> pd.DataFrame:
     d = df_all.copy()
-    if "minutes_full_all" in d.columns:
-        d["minutes_full_all"] = pd.to_numeric(d["minutes_full_all"], errors="coerce")
-    else:
-        d["minutes_full_all"] = np.nan
-
+    d["minutes_full_all"] = pd.to_numeric(d.get("minutes_full_all"), errors="coerce")
     d = d[(d["player_id"] == player_id) & (d["team_id"] == team_id)].copy()
     d = d[d["minutes_full_all"].between(min_mp, max_mp, inclusive="both")].copy()
     return d
@@ -229,13 +215,8 @@ def _compute_means_for_player(d: pd.DataFrame) -> dict:
 def _build_comparison_table(means_a: dict, means_b: dict, label_a: str, label_b: str) -> pd.DataFrame:
     rows = []
     for metric_key, alias_es in METRIC_ALIASES_ES.items():
-        rows.append({
-            "Métrica": alias_es,
-            label_a: means_a.get(metric_key, np.nan),
-            label_b: means_b.get(metric_key, np.nan),
-        })
+        rows.append({"Métrica": alias_es, label_a: means_a.get(metric_key, np.nan), label_b: means_b.get(metric_key, np.nan)})
     df_cmp = pd.DataFrame(rows)
-
     for c in [label_a, label_b]:
         df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").round(2)
 
@@ -246,30 +227,19 @@ def _build_comparison_table(means_a: dict, means_b: dict, label_a: str, label_b:
 
 def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
     def bold_row(row):
-        a = row[col_a]
-        b = row[col_b]
         styles = [""] * len(row)
-
-        try:
-            a_num = float(a) if pd.notna(a) else np.nan
-        except Exception:
-            a_num = np.nan
-        try:
-            b_num = float(b) if pd.notna(b) else np.nan
-        except Exception:
-            b_num = np.nan
-
+        a = pd.to_numeric(row[col_a], errors="coerce")
+        b = pd.to_numeric(row[col_b], errors="coerce")
         idx_a = row.index.get_loc(col_a)
         idx_b = row.index.get_loc(col_b)
-
-        if pd.notna(a_num) and pd.notna(b_num):
-            if a_num > b_num:
+        if pd.notna(a) and pd.notna(b):
+            if a > b:
                 styles[idx_a] = "font-weight: 700;"
-            elif b_num > a_num:
+            elif b > a:
                 styles[idx_b] = "font-weight: 700;"
-        elif pd.notna(a_num) and pd.isna(b_num):
+        elif pd.notna(a) and pd.isna(b):
             styles[idx_a] = "font-weight: 700;"
-        elif pd.isna(a_num) and pd.notna(b_num):
+        elif pd.isna(a) and pd.notna(b):
             styles[idx_b] = "font-weight: 700;"
         return styles
 
@@ -278,62 +248,63 @@ def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
     return sty
 
 def _mins_sum(d: pd.DataFrame) -> float:
-    if d.empty or "minutes_full_all" not in d.columns:
+    if d is None or d.empty:
         return 0.0
-    return float(pd.to_numeric(d["minutes_full_all"], errors="coerce").fillna(0).sum())
+    return float(pd.to_numeric(d.get("minutes_full_all"), errors="coerce").fillna(0).sum())
 
 # =========================
-# BOTÓN: limpiar cache
+# TOP BUTTONS
 # =========================
-c1, c2 = st.columns([6, 1])
-with c2:
-    if st.button("🔄 Actualizar datos"):
+b1, b2, b3 = st.columns([5, 1, 1])
+with b2:
+    if st.button("🔄 Limpiar cache API"):
         try:
             fetch_physical_one.clear()
         except Exception:
             pass
-        st.toast("Cache limpiada. Re-descargando…")
+        st.toast("Cache limpiada.")
+with b3:
+    if st.button("🧹 Reset selección"):
+        for k in ["df_all_a", "df_all_b", "df_players_a", "df_players_b", "meta_a", "meta_b"]:
+            st.session_state[k] = None
         st.rerun()
 
 today_key = date.today().isoformat()
 
 # =========================
-# UI: DOS SELECTORES (A y B)
+# UI: SELECTORES A/B (siempre visibles)
 # =========================
-st.subheader("Selección de competición/edición para los jugadores a comparar (A y B)")
+st.subheader("Selección de competición/edición (A y B)")
 
 left, right = st.columns(2, vertical_alignment="top")
 
 with left:
     st.markdown("### Jugador A — Competición")
-    a_country = st.selectbox("País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="a_country")
-    a_comp_label = st.selectbox("Competencia", list(COMPETITION_CATALOG[a_country].keys()), index=0, key="a_comp")
+    a_country = st.selectbox("A · País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="a_country")
+    a_comp_label = st.selectbox("A · Competencia", list(COMPETITION_CATALOG[a_country].keys()), index=0, key="a_comp")
     a_info = COMPETITION_CATALOG[a_country][a_comp_label]
     a_competition_id = a_info["competition_id"]
-    a_edition_label = st.selectbox("Edición", list(a_info["editions"].keys()), index=0, key="a_edition")
+    a_edition_label = st.selectbox("A · Edición", list(a_info["editions"].keys()), index=0, key="a_edition")
     a_competition_edition_id = a_info["editions"][a_edition_label]
     st.caption(f"A: competition_id={a_competition_id} | competition_edition_id={a_competition_edition_id}")
 
 with right:
     st.markdown("### Jugador B — Competición")
-    b_country = st.selectbox("País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="b_country")
-    b_comp_label = st.selectbox("Competencia", list(COMPETITION_CATALOG[b_country].keys()), index=0, key="b_comp")
+    b_country = st.selectbox("B · País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="b_country")
+    b_comp_label = st.selectbox("B · Competencia", list(COMPETITION_CATALOG[b_country].keys()), index=0, key="b_comp")
     b_info = COMPETITION_CATALOG[b_country][b_comp_label]
     b_competition_id = b_info["competition_id"]
-    b_edition_label = st.selectbox("Edición", list(b_info["editions"].keys()), index=0, key="b_edition")
+    b_edition_label = st.selectbox("B · Edición", list(b_info["editions"].keys()), index=0, key="b_edition")
     b_competition_edition_id = b_info["editions"][b_edition_label]
     st.caption(f"B: competition_id={b_competition_id} | competition_edition_id={b_competition_edition_id}")
 
-do_fetch = st.button("📥 Cargar información")
+# Botón descarga: guarda en session_state (clave para que NO "vuelva arriba")
+do_fetch = st.button("📥 Descargar (A y B)")
 
-# =========================
-# EXEC: descargar dos dfs + comparar
-# =========================
 if do_fetch:
-    with st.spinner("Descargando para Jugador A…"):
+    with st.spinner("Descargando /physical para A…"):
         df_all_a = fetch_physical_one(a_competition_id, a_competition_edition_id, cache_date=today_key)
-
-    with st.spinner("Descargando para Jugador B…"):
+    with st.spinner("Descargando /physical para B…"):
         df_all_b = fetch_physical_one(b_competition_id, b_competition_edition_id, cache_date=today_key)
 
     if df_all_a.empty:
@@ -343,16 +314,23 @@ if do_fetch:
         st.error("B: La API devolvió vacío para esta edición.")
         st.stop()
 
-    df_players_a = build_players_from_df_all(df_all_a)
-    df_players_b = build_players_from_df_all(df_all_b)
+    st.session_state["df_all_a"] = df_all_a
+    st.session_state["df_all_b"] = df_all_b
+    st.session_state["df_players_a"] = build_players_from_df_all(df_all_a)
+    st.session_state["df_players_b"] = build_players_from_df_all(df_all_b)
 
-    if df_players_a.empty:
-        st.error("A: No pude construir el listado de jugadores (faltan columnas clave).")
-        st.stop()
-    if df_players_b.empty:
-        st.error("B: No pude construir el listado de jugadores (faltan columnas clave).")
-        st.stop()
+    st.session_state["meta_a"] = {"country": a_country, "comp": a_comp_label, "edition": a_edition_label}
+    st.session_state["meta_b"] = {"country": b_country, "comp": b_comp_label, "edition": b_edition_label}
 
+# =========================
+# SI YA HAY DATA EN SESSION_STATE => MOSTRAR SELECTORES DE JUGADORES
+# =========================
+df_all_a = st.session_state["df_all_a"]
+df_all_b = st.session_state["df_all_b"]
+df_players_a = st.session_state["df_players_a"]
+df_players_b = st.session_state["df_players_b"]
+
+if df_all_a is not None and df_all_b is not None and df_players_a is not None and df_players_b is not None:
     st.success(
         f"Listo ✅ "
         f"A: entradas {len(df_all_a):,} | jugadores {len(df_players_a):,}   ·   "
@@ -360,7 +338,7 @@ if do_fetch:
     )
 
     st.divider()
-    st.subheader("Elegí a los dos jugadores (A y B)")
+    st.subheader("Elegí 2 jugadores (A y B) + rangos de minutos por partido")
 
     colL, colR = st.columns(2, vertical_alignment="top")
 
@@ -368,28 +346,16 @@ if do_fetch:
         p1_label = st.selectbox("Jugador A", df_players_a["label"].tolist(), index=0, key="p1_label")
         p1_row = df_players_a.loc[df_players_a["label"] == p1_label].iloc[0]
         player_a_id, team_a_id = int(p1_row["player_id"]), int(p1_row["team_id"])
-        minA, maxA = st.slider(
-            "Jugador A — Min/Max minutos por partido",
-            min_value=0, max_value=130, value=(60, 130), step=1, key="mins_a"
-        )
+        minA, maxA = st.slider("Jugador A — Min/Max minutos por partido", 0, 130, (60, 130), 1, key="mins_a")
 
     with colR:
         p2_label = st.selectbox("Jugador B", df_players_b["label"].tolist(), index=0, key="p2_label")
         p2_row = df_players_b.loc[df_players_b["label"] == p2_label].iloc[0]
         player_b_id, team_b_id = int(p2_row["player_id"]), int(p2_row["team_id"])
-        minB, maxB = st.slider(
-            "Jugador B — Min/Max minutos por partido",
-            min_value=0, max_value=130, value=(60, 130), step=1, key="mins_b"
-        )
+        minB, maxB = st.slider("Jugador B — Min/Max minutos por partido", 0, 130, (60, 130), 1, key="mins_b")
 
-    # Filtrar filas por jugador + rango mins (cada uno en su df)
     dA = _filter_player_rows(df_all_a, player_a_id, team_a_id, minA, maxA)
     dB = _filter_player_rows(df_all_b, player_b_id, team_b_id, minB, maxB)
-
-    if dA.empty:
-        st.warning("Jugador A: no hay filas que cumplan el rango de minutos elegido.")
-    if dB.empty:
-        st.warning("Jugador B: no hay filas que cumplan el rango de minutos elegido.")
 
     meansA = _compute_means_for_player(dA)
     meansB = _compute_means_for_player(dB)
@@ -400,29 +366,34 @@ if do_fetch:
     df_cmp = _build_comparison_table(meansA, meansB, col_name_a, col_name_b)
 
     st.divider()
-    st.subheader("Tabla comparativa (promedios)")
+    st.subheader("Tabla comparativa (promedios) — mayor en negrita (sin colores)")
+
     st.dataframe(_styler_bold_max(df_cmp, col_name_a, col_name_b), use_container_width=True, height=720)
 
     st.divider()
     st.subheader("Resumen de la muestra")
 
-    sumA = round(_mins_sum(dA), 0)
-    sumB = round(_mins_sum(dB), 0)
+    sumA = int(round(_mins_sum(dA), 0))
+    sumB = int(round(_mins_sum(dB), 0))
 
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(f"**Jugador A:** {p1_label}")
         st.write(f"Partidos que cumplieron el rango: **{len(dA):,}**")
-        st.write(f"Minutos totales (muestra): **{int(sumA):,}**")
-        st.caption(f"A: {a_country} · {a_comp_label} · {a_edition_label}")
+        st.write(f"Minutos totales (muestra): **{sumA:,}**")
+        meta_a = st.session_state.get("meta_a") or {}
+        st.caption(f"A: {meta_a.get('country','')} · {meta_a.get('comp','')} · {meta_a.get('edition','')}")
     with c2:
         st.markdown(f"**Jugador B:** {p2_label}")
         st.write(f"Partidos que cumplieron el rango: **{len(dB):,}**")
-        st.write(f"Minutos totales (muestra): **{int(sumB):,}**")
-        st.caption(f"B: {b_country} · {b_comp_label} · {b_edition_label}")
+        st.write(f"Minutos totales (muestra): **{sumB:,}**")
+        meta_b = st.session_state.get("meta_b") or {}
+        st.caption(f"B: {meta_b.get('country','')} · {meta_b.get('comp','')} · {meta_b.get('edition','')}")
 
     with st.expander("Ver filas raw filtradas (debug)", expanded=False):
         st.write("Jugador A — filas filtradas")
         st.dataframe(dA, use_container_width=True, height=260)
         st.write("Jugador B — filas filtradas")
         st.dataframe(dB, use_container_width=True, height=260)
+else:
+    st.info("Elegí competiciones/ediciones y tocá **📥 Descargar (A y B)** para cargar el listado de jugadores.")
