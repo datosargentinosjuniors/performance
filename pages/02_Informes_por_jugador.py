@@ -1,55 +1,160 @@
-# app_player_semestre.py
+# appstreamlit_players_compare.py
 # -*- coding: utf-8 -*-
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import date
 from io import BytesIO
-import matplotlib.pyplot as plt
-from matplotlib import patheffects as pe
-from matplotlib.ticker import StrMethodFormatter
 
 # =========================
-# CONFIG GENERAL
+# CONFIG
 # =========================
-st.set_page_config(page_title="Reportes por jugador", layout="wide")
-st.title("🏃‍♂️ Tracking por jugador — Informes por torneo")
-
-# IDs por defecto (ajustá si hace falta)
-COMPETITION_ID = 70
-COMP_EDITION_ID = 1073
-
-# Paleta de colores (coherente con tu app)
-RED_TOTAL = "#FB0B0E"
-BLUE_HSR  = "#0D3E8A"
-
-B3_COLOR = "#7FB3FF"  # 15–20 km/h
-B4_COLOR = "#0D3E8A"  # 20–25 km/h
-B5_COLOR = "#062557"  # >25 km/h
-
-ACC_MED_COLOR = "#7FB3FF"   # medio
-ACC_HIGH_COLOR = "#0D3E8A"  # alto
-DEC_MED_COLOR = "#FFB3B3"   # medio
-DEC_HIGH_COLOR = "#FB0B0E"  # alto
+st.set_page_config(page_title="SkillCorner — Comparativa física", layout="wide")
+st.title("🏃‍♂️ Comparador de futbolistas")
 
 # =========================
-# BOTÓN DE ACTUALIZACIÓN
+# CATÁLOGO (IDs fijos)
 # =========================
-col1, col2 = st.columns([6, 1])
-with col2:
-    if st.button("🔄 Actualizar datos"):
-        try:
-            fetch_physical.clear()
-        except Exception:
-            pass
-        st.toast("Cache limpiada. Re-descargando…")
-        st.rerun()
+COMPETITION_CATALOG = {
+    "Argentina": {
+        "Primera División (1st Phase)": {
+            "competition_id": 70,
+            "editions": {
+                "2018": 140, "2019": 107, "2020": 157, "2021": 293, "2022": 331,
+                "2023": 374, "2024": 767, "2025": 1073, "2026": 1390,
+            },
+        },
+        "Primera División (2nd Phase)": {
+            "competition_id": 376,
+            "editions": {"2024": 865},
+        },
+        "Primera Nacional": {
+            "competition_id": 412,
+            "editions": {"2024": 969, "2025": 1059, "2026": 1419},
+        },
+    },
+    "USA": {
+        "MLS": {
+            "competition_id": 60,
+            "editions": {
+                "2017": 89, "2018": 99, "2019": 168, "2020": 198, "2021": 235,
+                "2022": 360, "2023": 419, "2024": 798, "2025": 1091, "2026": 1393,
+            },
+        },
+    },
+    "México": {
+        "Liga MX": {
+            "competition_id": 97,
+            "editions": {
+                "2016/2017": 84, "2019/2020": 290, "2020/2021": 200, "2021/2022": 267,
+                "2022/2023": 400, "2023/2024": 558, "2024/2025": 922, "2025/2026": 1169,
+            },
+        },
+    },
+    "Uruguay": {
+        "Primera División": {
+            "competition_id": 95,
+            "editions": {
+                "2019": 197, "2020": 196, "2021": 312, "2022": 359,
+                "2023": 418, "2024": 797, "2025": 1090, "2026": 1400,
+            },
+        },
+    },
+    "Paraguay": {
+        "División Profesional": {
+            "competition_id": 140,
+            "editions": {"2021": 315, "2022": 354, "2023": 404, "2024": 793, "2025": 1087, "2026": 1383},
+        },
+    },
+}
 
 # =========================
-# FUNCIÓN DE DESCARGA (CACHE DIARIO)
+# ALIASES (solo estas métricas quedan)
+# =========================
+METRIC_ALIASES_ES = {
+    "total_distance_full_all": "Distancia total",
+    "total_metersperminute_full_all": "Metros por minuto",
+    "running_distance_full_all": "Distancia corriendo (B3)",
+    "hsr_distance_full_all": "Distancia en HSR",
+    "hsr_count_full_all": "Cantidad de veces que alcanzó HSR (B4)",
+    "sprint_distance_full_all": "Distancia en sprint (B5)",
+    "sprint_count_full_all": "Cantidad de veces que realizó un sprint (B5)",
+    "hi_count_full_all": "Cantidad de veces que alcanzó una alta intensidad (B4 o B5)",
+    "hi_distance_full_all": "Distancia en alta intensidad (B4 + B5)",
+    "highaccel_count_full_all": "Aceleraciones altas",
+    "highdecel_count_full_all": "Desaceleraciones altas",
+    "medaccel_count_full_all": "Aceleraciones medias",
+    "meddecel_count_full_all": "Desaceleraciones medias",
+    "psv99": "Velocidad máxima (PSV99)",
+    "explacceltohsr_count_full_all": "Aceleraciones explosivas a HSR (B4)",
+    "timetohsr": "Tiempo a un HSR (B4)",
+    "explacceltosprint_count_full_all": "Aceleraciones explosivas a sprint (B5)",
+    "timetosprint": "Tiempo a un sprint (B5)",
+    "cod_count_full_all": "Cambios de dirección",
+    "timetohsrpostcod": "Tiempo a un HSR (B4) post cambio de ritmo",
+    "timetosprintpostcod": "Tiempo a un sprint (B5) post cambio de ritmo",
+}
+
+# Orden EXACTO como tu captura 2 (por alias en español)
+ROW_ORDER_ES = [
+    "Distancia total",
+    "Metros por minuto",
+    "Distancia corriendo (B3)",
+    "Distancia en HSR",
+    "Cantidad de veces que alcanzó HSR (B4)",
+    "Distancia en sprint (B5)",
+    "Cantidad de veces que realizó un sprint (B5)",
+    "Cantidad de veces que alcanzó una alta intensidad (B4 o B5)",
+    "Distancia en alta intensidad (B4 + B5)",
+    "Aceleraciones altas",
+    "Desaceleraciones altas",
+    "Aceleraciones medias",
+    "Desaceleraciones medias",
+    "Velocidad máxima (PSV99)",
+    "Aceleraciones explosivas a HSR (B4)",
+    "Tiempo a un HSR (B4)",
+    "Aceleraciones explosivas a sprint (B5)",
+    "Tiempo a un sprint (B5)",
+    "Cambios de dirección",
+    "Tiempo a un HSR (B4) post cambio de ritmo",
+    "Tiempo a un sprint (B5) post cambio de ritmo",
+]
+
+# =========================
+# HELPERS: resp -> DataFrame
+# =========================
+def _resp_to_df(resp) -> pd.DataFrame:
+    if isinstance(resp, list):
+        return pd.DataFrame(resp)
+    if isinstance(resp, dict):
+        return pd.json_normalize(resp)
+    return pd.read_csv(BytesIO(resp))
+
+def _coerce_types(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    if "match_date" in df.columns:
+        df["match_date"] = pd.to_datetime(df["match_date"], errors="coerce").dt.date
+
+    for c in ["match_id", "team_id", "player_id"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    if "minutes_full_all" in df.columns:
+        df["minutes_full_all"] = pd.to_numeric(df["minutes_full_all"], errors="coerce")
+
+    if "player_short_name" in df.columns and "player_name" in df.columns:
+        df["player_short_name"] = df["player_short_name"].fillna(df["player_name"])
+
+    return df
+
+# =========================
+# FETCH: 1 edición (cache diario)
 # =========================
 @st.cache_data(show_spinner=True)
-def fetch_physical(competition: int, competition_edition: int, cache_date: str) -> pd.DataFrame:
+def fetch_physical_one(competition_id: int, competition_edition_id: int, cache_date: str) -> pd.DataFrame:
     from skillcorner.client import SkillcornerClient
 
     client = SkillcornerClient(
@@ -57,560 +162,281 @@ def fetch_physical(competition: int, competition_edition: int, cache_date: str) 
         password=st.secrets["SKILLCORNER_PASSWORD"],
     )
 
-    params = {"competition": [competition], "competition_edition": [competition_edition]}
+    params = {"competition": [competition_id], "competition_edition": [competition_edition_id]}
     resp = client.get_physical(params=params, raise_for_status=True)
 
-    if isinstance(resp, list):
-        df = pd.DataFrame(resp)
-    elif isinstance(resp, dict):
-        df = pd.json_normalize(resp)
-    else:
-        df = pd.read_csv(BytesIO(resp))
+    df = _resp_to_df(resp)
+    df = _coerce_types(df)
 
-    # Tipos básicos
-    if "match_date" in df.columns:
-        df["match_date"] = pd.to_datetime(df["match_date"], errors="coerce").dt.date
-    for c in ["match_id", "team_id", "player_id"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # Normalizaciones útiles
-    if "player_short_name" in df.columns:
-        df["player_short_name"] = df["player_short_name"].fillna(df.get("player_name", ""))
-    if "match_name" in df.columns:
-        df["match_name"] = df["match_name"].astype(str)
+    # metadata útil
+    df["competition_id"] = competition_id
+    df["competition_edition_id"] = competition_edition_id
 
     return df
 
-today_key = date.today().isoformat()
-with st.spinner("Descargando datos físicos desde SkillCorner…"):
-    df = fetch_physical(COMPETITION_ID, COMP_EDITION_ID, cache_date=today_key)
-
-if df.empty:
-    st.error("No se recibieron datos del endpoint /api/physical.")
-    st.stop()
-
-# =========================
-# UTILIDADES
-# =========================
-def _set_font_family():
-    plt.rcParams['font.family'] = ['Proxima Nova', 'DejaVu Sans', 'Arial', 'Helvetica']
-
-def map_opponent_from_match(df_all: pd.DataFrame) -> pd.DataFrame:
+def build_players_from_df_all(df_all: pd.DataFrame) -> pd.DataFrame:
     """
-    Para cada match_id, mapeamos los dos team_name.
-    Luego, para cada fila, opponent_name = el otro team_name del mismo partido.
+    1 fila por player_id + team_id (para evitar mezclar traspasos dentro de la edición).
     """
-    if not set(["match_id", "team_name"]).issubset(df_all.columns):
-        return df_all.copy()
+    if df_all.empty or "player_id" not in df_all.columns:
+        return pd.DataFrame()
 
-    teams_by_match = (
-        df_all[["match_id", "team_name"]]
-        .dropna()
-        .drop_duplicates()
-        .groupby("match_id")["team_name"]
-        .apply(list)
-        .to_dict()
+    keep = [c for c in [
+        "player_id", "player_short_name", "player_name",
+        "team_id", "team_name",
+        "minutes_full_all"
+    ] if c in df_all.columns]
+
+    d = df_all[keep].copy()
+
+    if "minutes_full_all" in d.columns:
+        d["minutes_full_all"] = pd.to_numeric(d["minutes_full_all"], errors="coerce").fillna(0)
+    else:
+        d["minutes_full_all"] = 0
+
+    gcols = [c for c in ["player_id", "team_id"] if c in d.columns]
+    players = (
+        d.groupby(gcols, as_index=False)
+         .agg({
+             "player_short_name": "first" if "player_short_name" in d.columns else "first",
+             "player_name": "first" if "player_name" in d.columns else "first",
+             "team_name": "first" if "team_name" in d.columns else "first",
+             "minutes_full_all": "sum",
+         })
     )
 
-    def _opp(row):
-        mids = row["match_id"]
-        my_team = row["team_name"]
-        names = teams_by_match.get(mids, [])
-        if names and my_team in names and len(names) >= 2:
-            return [n for n in names if n != my_team][0]
-        # fallback: intentar parsear match_name si vino como "A - B"
-        mn = str(row.get("match_name", ""))
-        if " - " in mn:
-            a, b = [x.strip() for x in mn.split(" - ", 1)]
-            return b if a == my_team else a if b == my_team else b
-        return np.nan
+    players = players.sort_values(
+        ["minutes_full_all", "team_name", "player_short_name"],
+        ascending=[False, True, True]
+    ).reset_index(drop=True)
 
-    out = df_all.copy()
-    out["opponent_name"] = out.apply(_opp, axis=1)
+    # etiqueta linda para selectbox
+    players["label"] = (
+        players["player_short_name"].fillna(players["player_name"]).fillna("—").astype(str)
+        + " — " + players["team_name"].fillna("—").astype(str)
+        + "  |  " + players["minutes_full_all"].round(0).astype(int).astype(str) + " min"
+    )
+    return players
+
+def _filter_player_rows(df_all: pd.DataFrame, player_id: int, team_id: int, min_mp: float, max_mp: float) -> pd.DataFrame:
+    d = df_all.copy()
+    if "minutes_full_all" in d.columns:
+        d["minutes_full_all"] = pd.to_numeric(d["minutes_full_all"], errors="coerce")
+    else:
+        d["minutes_full_all"] = np.nan
+
+    d = d[(d["player_id"] == player_id) & (d["team_id"] == team_id)].copy()
+    d = d[d["minutes_full_all"].between(min_mp, max_mp, inclusive="both")].copy()
+    return d
+
+def _compute_means_for_player(d: pd.DataFrame) -> dict:
+    """
+    Promedia SOLO métricas con alias. Si la métrica no existe, queda NaN.
+    """
+    out = {}
+    for metric_key in METRIC_ALIASES_ES.keys():
+        if metric_key in d.columns:
+            out[metric_key] = pd.to_numeric(d[metric_key], errors="coerce").mean()
+        else:
+            out[metric_key] = np.nan
     return out
 
-def build_row_label(opponent: str, position: str, minutes) -> str:
-    """
-    Etiqueta compacta para el eje Y: 'Rival | position | minutes min'
-    Sin fecha (por pedido), pero la ordenación se hace por fecha desc.
-    """
-    pos_txt = "-" if pd.isna(position) or position == "" else str(position)
-    try:
-        mins_val = pd.to_numeric(minutes, errors="coerce")
-    except Exception:
-        mins_val = np.nan
-    mins_txt = "-" if pd.isna(mins_val) else f"{int(round(float(mins_val)))}"
-    opp_txt = "" if pd.isna(opponent) else str(opponent)
-    label = f"{opp_txt} | {pos_txt} | {mins_txt} min"
-    return label.strip()
+def _build_comparison_table(means_a: dict, means_b: dict, label_a: str, label_b: str) -> pd.DataFrame:
+    rows = []
+    for metric_key, alias_es in METRIC_ALIASES_ES.items():
+        rows.append({
+            "Métrica": alias_es,
+            label_a: means_a.get(metric_key, np.nan),
+            label_b: means_b.get(metric_key, np.nan),
+        })
+    df_cmp = pd.DataFrame(rows)
 
-def xlim_with_margin(values, right_pct: float = 0.25):
+    # redondeo a 2 decimales
+    for c in [label_a, label_b]:
+        df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").round(2)
+
+    # orden por tu lista
+    order_map = {name: i for i, name in enumerate(ROW_ORDER_ES)}
+    df_cmp["_ord"] = df_cmp["Métrica"].map(order_map).fillna(9999).astype(int)
+    df_cmp = df_cmp.sort_values("_ord").drop(columns=["_ord"]).reset_index(drop=True)
+
+    # (extra) si por alguna razón aparece algo fuera del orden, lo deja al final
+    return df_cmp
+
+def _styler_bold_max(df_cmp: pd.DataFrame, col_a: str, col_b: str):
     """
-    Devuelve (0, vmax*(1+right_pct)) garantizando rango > 0.
+    Sin colores de fondo. Solo deja en negrita el mayor por fila.
     """
-    vmax = float(np.nanmax(values)) if len(values) else 0.0
-    vmax = max(vmax, 1.0)  # evita rango 0
-    return (0.0, vmax * (1.0 + right_pct))
+    def bold_row(row):
+        a = row[col_a]
+        b = row[col_b]
+        styles = [""] * len(row)
+
+        try:
+            a_num = float(a) if pd.notna(a) else np.nan
+        except Exception:
+            a_num = np.nan
+        try:
+            b_num = float(b) if pd.notna(b) else np.nan
+        except Exception:
+            b_num = np.nan
+
+        # índices
+        idx_a = row.index.get_loc(col_a)
+        idx_b = row.index.get_loc(col_b)
+
+        if pd.notna(a_num) and pd.notna(b_num):
+            if a_num > b_num:
+                styles[idx_a] = "font-weight: 700;"
+            elif b_num > a_num:
+                styles[idx_b] = "font-weight: 700;"
+            # empate: nada
+        elif pd.notna(a_num) and pd.isna(b_num):
+            styles[idx_a] = "font-weight: 700;"
+        elif pd.isna(a_num) and pd.notna(b_num):
+            styles[idx_b] = "font-weight: 700;"
+        return styles
+
+    sty = df_cmp.style.apply(bold_row, axis=1)
+    sty = sty.format({col_a: "{:.2f}", col_b: "{:.2f}"}, na_rep="—")
+    return sty
 
 # =========================
-# FILTROS EN PÁGINA
+# BOTÓN: limpiar cache
 # =========================
-st.subheader("Filtros")
+c1, c2 = st.columns([6, 1])
+with c2:
+    if st.button("🔄 Actualizar datos"):
+        try:
+            fetch_physical_one.clear()
+        except Exception:
+            pass
+        st.toast("Cache limpiada. Re-descargando…")
+        st.rerun()
 
-colA, colB = st.columns([1.2, 2], vertical_alignment="bottom")
+# =========================
+# UI: selects (competición + edición)
+# =========================
+col1, col2, col3, col4 = st.columns([1.2, 1.8, 1.2, 1], vertical_alignment="bottom")
 
-with colA:
-    if "match_date" not in df.columns or df["match_date"].isna().all():
-        st.error("La columna 'match_date' no está disponible o no tiene datos válidos.")
+with col1:
+    country = st.selectbox("País/Liga", list(COMPETITION_CATALOG.keys()), index=0)
+
+with col2:
+    comp_label = st.selectbox("Competencia", list(COMPETITION_CATALOG[country].keys()), index=0)
+
+info = COMPETITION_CATALOG[country][comp_label]
+competition_id = info["competition_id"]
+
+with col3:
+    edition_label = st.selectbox("Edición", list(info["editions"].keys()), index=0)
+
+competition_edition_id = info["editions"][edition_label]
+
+with col4:
+    do_fetch = st.button("📥 Descargar")
+
+st.caption(f"Seleccionado: competition_id={competition_id} | competition_edition_id={competition_edition_id}")
+
+# =========================
+# EXEC: download + select players + filters + compare
+# =========================
+if do_fetch:
+    today_key = date.today().isoformat()
+    with st.spinner("Descargando /physical…"):
+        df_all = fetch_physical_one(competition_id, competition_edition_id, cache_date=today_key)
+
+    if df_all.empty:
+        st.error("La API devolvió vacío para esta edición.")
         st.stop()
 
-    max_date = df["match_date"].max()
-    data_year = int(max_date.year)
-
-    sem1_start = date(data_year, 1, 1)
-    sem1_end = date(data_year, 6, 2)
-    sem2_start = date(data_year, 6, 4)
-    sem2_end = max_date
-
-    semestre = st.radio("Semestre", ["Semestre 1", "Semestre 2"], horizontal=True, index=0)
-
-if semestre == "Semestre 1":
-    df_sem = df[(df["match_date"] >= sem1_start) & (df["match_date"] <= sem1_end)].copy()
-else:
-    df_sem = df[(df["match_date"] >= sem2_start) & (df["match_date"] <= sem2_end)].copy()
-
-if df_sem.empty:
-    st.warning("No hay datos para el semestre seleccionado.")
-    st.stop()
-
-with colB:
-    # Selector de jugador directo (incluye equipo entre paréntesis antes del ID)
-    if "player_short_name" not in df_sem.columns or df_sem["player_short_name"].isna().all():
-        st.error("No hay identificadores de jugador válidos.")
+    df_players = build_players_from_df_all(df_all)
+    if df_players.empty:
+        st.error("No pude construir el listado de jugadores (faltan columnas clave).")
         st.stop()
 
-    jugadores = (
-        df_sem[["player_id", "player_short_name", "team_name"]]
-        .dropna(subset=["player_id"])
-        .drop_duplicates()
-        .sort_values(["player_short_name", "team_name"])
-        .to_dict("records")
-    )
-    if not jugadores:
-        st.warning("No se encontraron jugadores para ese filtro.")
-        st.stop()
-
-    def _label(j):
-        name = str(j.get("player_short_name", ""))
-        team = str(j.get("team_name", ""))
-        pid  = int(j["player_id"])
-        team_txt = f" ({team})" if team else ""
-        return f"{name}{team_txt} · ID {pid}"
-
-    player_label_opts = [_label(j) for j in jugadores]
-    player_label = st.selectbox("Jugador", player_label_opts)
-    player_id_sel = int(player_label.split("· ID")[-1].strip())
-
-# Subconjunto por jugador, mapeo de rival y label por partido
-df_sem = map_opponent_from_match(df_sem)
-df_player = df_sem[df_sem["player_id"] == player_id_sel].copy()
-
-if df_player.empty:
-    st.warning("No hay datos del jugador en el semestre elegido.")
-    st.stop()
-
-player_name = str(df_player["player_short_name"].iloc[0])
-team_name_own = str(df_player["team_name"].value_counts().index[0]) if "team_name" in df_player else ""
-
-# Orden cronológico: más nuevo primero
-if "match_date" in df_player.columns:
-    df_player["_match_order"] = pd.to_datetime(df_player["match_date"], errors="coerce")
-    df_player = df_player.sort_values("_match_order", ascending=False).copy()
-else:
-    df_player["_match_order"] = np.arange(len(df_player))[::-1]
-
-# Etiqueta (sin fecha) para cada partido: "Rival | position | minutes min"
-df_player["row_label"] = df_player.apply(
-    lambda r: build_row_label(r.get("opponent_name", np.nan), r.get("position", np.nan), r.get("minutes_full_all", np.nan)),
-    axis=1
-)
-
-st.divider()
-st.subheader(f"Jugador: {player_name}  | Equipo: {team_name_own}")
-
-# =========================
-# VISUALIZACIONES (orden: el más reciente arriba) — con margen derecho 10% para la leyenda
-# =========================
-def vis1_player_total_vs_mpm(df_player, player_name):
-    need = ['row_label', 'total_distance_full_all', 'total_metersperminute_full_all', '_match_order']
-    if not all(c in df_player.columns for c in need): return
-    d = df_player[need].copy().sort_values("_match_order", ascending=False)
-
-    d["total_distance_full_all"] = pd.to_numeric(d["total_distance_full_all"], errors="coerce").fillna(0)
-    d["total_metersperminute_full_all"] = pd.to_numeric(d["total_metersperminute_full_all"], errors="coerce").fillna(0)
-
-    ylabels = d['row_label'].tolist()
-    totals = d['total_distance_full_all'].to_numpy()
-    mpm = d['total_metersperminute_full_all'].to_numpy()
-    y = np.arange(len(ylabels))
-
-    height = max(6, len(ylabels) * 0.5)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=170); _set_font_family()
-
-    ax.barh(y, totals, color=RED_TOTAL, alpha=0.9, edgecolor='none')
-    ax.set_xlim(*xlim_with_margin(totals, right_pct=0.10))
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3)
-    ax.set_yticks(y); ax.set_yticklabels(ylabels)
-    ax.set_xlabel("Distancia total (m)")
-    ax.set_title(f"{player_name} — Distancia por partido + m/min", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()
-
-    for yi, val in zip(y, mpm):
-        ax.text(100, yi, f"{val:.1f} m/min",
-                va='center', ha='left', color='white', fontweight='bold',
-                fontsize=10, path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-
-    for yi, t in zip(y, totals):
-        if t > 0:
-            if t >= 1500:
-                ax.text(t * 0.98, yi, f"{t:,.0f} m",
-                        va='center', ha='right', color='white', fontweight='bold',
-                        fontsize=10, path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-            else:
-                ax.text(t + 10, yi, f"{t:,.0f} m",
-                        va='center', ha='left', color='black', fontweight='bold', fontsize=10)
-
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def _prep_b345_player(df_player: pd.DataFrame):
-    need = ['row_label', '_match_order', 'total_distance_full_all',
-            'running_distance_full_all','hsr_distance_full_all','sprint_distance_full_all']
-    if not all(c in df_player.columns for c in need): return None
-    d = df_player[need].copy().sort_values("_match_order", ascending=False)
-    for c in ['total_distance_full_all','running_distance_full_all','hsr_distance_full_all','sprint_distance_full_all']:
-        d[c] = pd.to_numeric(d[c], errors='coerce').fillna(0)
-    d["sum_b345"] = d["running_distance_full_all"] + d["hsr_distance_full_all"] + d["sprint_distance_full_all"]
-    d["pct_b345"] = np.where(d["total_distance_full_all"] > 0,
-                             (d["sum_b345"] / d["total_distance_full_all"]) * 100.0, 0.0)
-    return d
-
-def vis2_player_b345_stacked(df_player, player_name):
-    d = _prep_b345_player(df_player)
-    if d is None: return
-
-    labels = d['row_label'].tolist()
-    b3 = d['running_distance_full_all'].to_numpy()
-    b4 = d['hsr_distance_full_all'].to_numpy()
-    b5 = d['sprint_distance_full_all'].to_numpy()
-    total_stack = b3 + b4 + b5
-    y = np.arange(len(labels))
-
-    height = max(6, len(labels) * 0.5)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    left = np.zeros_like(b3, dtype=float)
-    b3b = ax.barh(y, b3, left=left, color=B3_COLOR, alpha=0.95, edgecolor='none', label="B3: 15–20 km/h")
-    left = left + b3
-    b4b = ax.barh(y, b4, left=left, color=B4_COLOR, alpha=0.95, edgecolor='none', label="B4: 20–25 km/h")
-    left = left + b4
-    b5b = ax.barh(y, b5, left=left, color=B5_COLOR, alpha=0.95, edgecolor='none', label="B5: >25 km/h")
-
-    ax.set_xlim(*xlim_with_margin(total_stack, right_pct=0.30))
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Distancia (m)")
-    ax.set_title(f"{player_name} — HID (B3/B4/B5) por partido", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()
-
-    for arr, cont in [(b3, b3b), (b4, b4b)]:
-        for rect, width in zip(cont.patches, arr):
-            if width <= 0: continue
-            yi = rect.get_y() + rect.get_height()/2.0
-            xm = rect.get_x() + width/2.0
-            ax.text(xm, yi, f"{width:,.0f} m", va='center', ha='center',
-                    color='white', fontweight='bold', fontsize=9,
-                    path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    for rect, width in zip(b5b.patches, b5):
-        if width <= 0: continue
-        yi = rect.get_y() + rect.get_height()/2.0
-        x1 = rect.get_x() + rect.get_width()
-        ax.text(x1 + 10, yi, f"{width:,.0f} m", va='center', ha='left',
-                color=B5_COLOR, fontweight='bold', fontsize=9)
-
-    ax.legend(loc="lower right", ncols=1, frameon=False)
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def vis3_player_b345_sum_pct(df_player, player_name):
-    d = _prep_b345_player(df_player)
-    if d is None: return
-
-    labels = d['row_label'].tolist()
-    total = d['total_distance_full_all'].to_numpy()
-    sum_b = d['sum_b345'].to_numpy()
-    pct_b = np.where(total > 0, (sum_b / total) * 100.0, 0.0)
-
-    y = np.arange(len(labels))
-    height = max(6, len(labels) * 0.5)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    ax.barh(y, sum_b, color=BLUE_HSR, alpha=0.95, edgecolor='none')
-    ax.set_xlim(*xlim_with_margin(sum_b, right_pct=0.10))
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Distancia (m)")
-    ax.set_title(f"{player_name} — HID (B3+B4+B5) y % del total por partido", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()
-
-    for yi, p in enumerate(pct_b):
-        ax.text(25, yi, f"{p:.0f}%", va='center', ha='left',
-                color='white', fontsize=10, fontweight='bold',
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    for yi, sb in enumerate(sum_b):
-        if sb > 0:
-            if sb >= 1200:
-                ax.text(sb * 0.98, yi, f"{sb:,.0f} m",
-                        va='center', ha='right', color='white', fontweight='bold', fontsize=10,
-                        path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-            else:
-                ax.text(sb + 10, yi, f"{sb:,.0f} m",
-                        va='center', ha='left', color='black', fontweight='bold', fontsize=10)
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def _prep_counts_player(df_player: pd.DataFrame, cols: list, sum_col_name: str) -> pd.DataFrame:
-    need = ['row_label', '_match_order'] + cols
-    if not all(c in df_player.columns for c in need): return None
-    d = df_player[need].copy().sort_values("_match_order", ascending=False)
-    for c in cols:
-        d[c] = pd.to_numeric(d[c], errors='coerce').fillna(0)
-    d[sum_col_name] = d[cols[0]] + d[cols[1]]
-    return d
-
-def vis4_player_accels(df_player, player_name):
-    cols = ['medaccel_count_full_all', 'highaccel_count_full_all']
-    d = _prep_counts_player(df_player, cols, 'sum_acc')
-    if d is None: return
-    labels = d['row_label'].tolist()
-    med = d[cols[0]].to_numpy(); high = d[cols[1]].to_numpy()
-    sums = med + high
-    y = np.arange(len(labels))
-
-    height = max(6, len(labels) * 0.45)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    ax.set_xlim(*xlim_with_margin(sums, right_pct=0.10))
-
-    left = np.zeros_like(med, dtype=float)
-    bmed  = ax.barh(y, med,  left=left, color=ACC_MED_COLOR,  alpha=0.95, edgecolor='none', label="Acel. medias")
-    left  = left + med
-    bhigh = ax.barh(y, high, left=left, color=ACC_HIGH_COLOR, alpha=0.95, edgecolor='none', label="Acel. altas")
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Cantidad")
-    ax.set_title(f"{player_name} — Aceleraciones por partido", fontsize=14, pad=20, fontweight='bold')
-    ax.text(0.5, 1.03,
-            "Medias: 1.5–3.0 m/s² (≥0.7 s)   •   Altas: >3.0 m/s² (≥0.7 s)",
-            transform=ax.transAxes, ha='center', va='center', fontsize=10, color='black')
-    ax.invert_yaxis()
-
-    for rect, width in zip(bmed.patches, med):
-        if width <= 0: continue
-        yi = rect.get_y() + rect.get_height()/2.0
-        xm = rect.get_x() + width/2.0
-        ax.text(xm, yi, f"{int(width)}", va='center', ha='center',
-                color='white', fontweight='bold', fontsize=9,
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    for rect, width in zip(bhigh.patches, high):
-        if width <= 0: continue
-        yi = rect.get_y() + rect.get_height()/2.0
-        xm = rect.get_x() + rect.get_width() - (width/2.0)
-        ax.text(xm, yi, f"{int(width)}", va='center', ha='center',
-                color='white', fontweight='bold', fontsize=9,
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    ax.legend(loc="lower right", frameon=False)
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def vis5_player_decels(df_player, player_name):
-    cols = ['meddecel_count_full_all', 'highdecel_count_full_all']
-    d = _prep_counts_player(df_player, cols, 'sum_dec')
-    if d is None: return
-    labels = d['row_label'].tolist()
-    med = d[cols[0]].to_numpy(); high = d[cols[1]].to_numpy()
-    sums = med + high
-    y = np.arange(len(labels))
-
-    height = max(6, len(labels) * 0.45)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    ax.set_xlim(*xlim_with_margin(sums, right_pct=0.10))
-
-    left = np.zeros_like(med, dtype=float)
-    bmed  = ax.barh(y, med,  left=left, color=DEC_MED_COLOR,  alpha=0.95, edgecolor='none', label="Desacel. medias")
-    left  = left + med
-    bhigh = ax.barh(y, high, left=left, color=DEC_HIGH_COLOR, alpha=0.95, edgecolor='none', label="Desacel. altas")
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Cantidad")
-    ax.set_title(f"{player_name} — Desaceleraciones por partido", fontsize=14, pad=20, fontweight='bold')
-    ax.text(0.5, 1.03,
-            "Medias: −1.5 a −3.0 m/s² (≥0.7 s)   •   Altas: < −3.0 m/s² (≥0.7 s)",
-            transform=ax.transAxes, ha='center', va='center', fontsize=10, color='black')
-    ax.invert_yaxis()
-
-    for rect, width in zip(bmed.patches, med):
-        if width <= 0: continue
-        yi = rect.get_y() + rect.get_height()/2.0
-        xm = rect.get_x() + width/2.0
-        ax.text(xm, yi, f"{int(width)}", va='center', ha='center',
-                color='black', fontweight='bold', fontsize=9)
-    for rect, width in zip(bhigh.patches, high):
-        if width <= 0: continue
-        yi = rect.get_y() + rect.get_height()/2.0
-        xm = rect.get_x() + rect.get_width() - (width/2.0)
-        ax.text(xm, yi, f"{int(width)}", va='center', ha='center',
-                color='white', fontweight='bold', fontsize=9,
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    ax.legend(loc="lower right", frameon=False)
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def vis6_player_expl_to_hsr(df_player, player_name):
-    COUNT_COL, TIME_COL = 'explacceltohsr_count_full_all', 'timetohsr'
-    need = ['row_label', COUNT_COL, TIME_COL, '_match_order']
-    if not all(c in df_player.columns for c in need): return
-    d = df_player[need].copy().sort_values("_match_order", ascending=False)
-    d[COUNT_COL] = pd.to_numeric(d[COUNT_COL], errors='coerce').fillna(0)
-    d[TIME_COL]  = pd.to_numeric(d[TIME_COL],  errors='coerce')
-
-    labels = d['row_label'].tolist()
-    counts = d[COUNT_COL].to_numpy()
-    times  = d[TIME_COL].to_numpy()
-    y = np.arange(len(labels))
-
-    height = max(6, len(labels) * 0.5)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    ax.set_xlim(*xlim_with_margin(counts, right_pct=0.10))
-
-    bars = ax.barh(y, counts, color=B4_COLOR, alpha=0.95, edgecolor='none')
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Cantidad")
-    ax.set_title(f"{player_name} — Explosive accel → HSR (B4)", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()
-
-    x0, x1 = ax.get_xlim()
-    base_x = x0 + 0.02*(x1 - x0)
-    for yi, t in enumerate(times):
-        txt = "–" if pd.isna(t) else f"{t:.1f} s"
-        ax.text(base_x, yi, txt, va='center', ha='left',
-                color='white', fontsize=10, fontweight='bold',
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    for rect, c in zip(bars.patches, counts):
-        if c <= 0: continue
-        yi = rect.get_y() + rect.get_height() / 2.0
-        x_end = rect.get_x() + rect.get_width()
-        ax.text(x_end + 0.01*(x1-x0), yi, f"{int(c)}",
-                va='center', ha='left', color='black', fontweight='bold', fontsize=10)
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def vis7_player_expl_to_sprint(df_player, player_name):
-    COUNT_COL, TIME_COL = 'explacceltosprint_count_full_all', 'timetosprint'
-    need = ['row_label', COUNT_COL, TIME_COL, '_match_order']
-    if not all(c in df_player.columns for c in need): return
-    d = df_player[need].copy().sort_values("_match_order", ascending=False)
-    d[COUNT_COL] = pd.to_numeric(d[COUNT_COL], errors='coerce').fillna(0)
-    d[TIME_COL]  = pd.to_numeric(d[TIME_COL],  errors='coerce')
-
-    labels = d['row_label'].tolist()
-    counts = d[COUNT_COL].to_numpy()
-    times  = d[TIME_COL].to_numpy()
-    y = np.arange(len(labels))
-
-    height = max(6, len(labels) * 0.5)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    ax.set_xlim(*xlim_with_margin(counts, right_pct=0.10))
-
-    bars = ax.barh(y, counts, color=B5_COLOR, alpha=0.95, edgecolor='none')
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Cantidad")
-    ax.set_title(f"{player_name} — Explosive accel → Sprint (B5)", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()
-
-    x0, x1 = ax.get_xlim()
-    base_x = x0 + 0.02*(x1 - x0)
-    for yi, t in enumerate(times):
-        txt = "–" if pd.isna(t) else f"{t:.1f} s"
-        ax.text(base_x, yi, txt, va='center', ha='left',
-                color='white', fontsize=10, fontweight='bold',
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    for rect, c in zip(bars.patches, counts):
-        if c <= 0: continue
-        yi = rect.get_y() + rect.get_height() / 2.0
-        x_end = rect.get_x() + rect.get_width()
-        ax.text(x_end + 0.01*(x1-x0), yi, f"{int(c)}",
-                va='center', ha='left', color='black', fontweight='bold', fontsize=10)
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-def vis8_player_psv99(df_player, player_name):
-    COL = 'psv99'
-    need = ['row_label', COL, '_match_order']
-    if not all(c in df_player.columns for c in need): return
-    d = df_player[need].copy().sort_values("_match_order", ascending=False)
-    d[COL] = pd.to_numeric(d[COL], errors='coerce').fillna(0)
-
-    labels = d['row_label'].tolist()
-    speeds  = d[COL].to_numpy()
-    y = np.arange(len(labels))
-    height = max(6, len(labels) * 0.5)
-    fig, ax = plt.subplots(figsize=(13, height), dpi=120); _set_font_family()
-
-    bars = ax.barh(y, speeds, color=B5_COLOR, alpha=0.95, edgecolor='none')
-    ax.set_xlim(*xlim_with_margin(speeds, right_pct=0.10))
-
-    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.1f}'))
-    ax.grid(axis='x', linestyle=':', alpha=0.3); ax.set_axisbelow(True)
-    ax.set_yticks(y); ax.set_yticklabels(labels)
-    ax.set_xlabel("Velocidad (km/h)")
-    ax.set_title(f"{player_name} — PSV99 por partido", fontsize=14, pad=12, fontweight='bold')
-    ax.invert_yaxis()
-
-    for rect, v in zip(bars.patches, speeds):
-        if v <= 0: continue
-        yi = rect.get_y() + rect.get_height() / 2.0
-        x_end = rect.get_x() + rect.get_width()
-        x_label = x_end - 0.02 * (ax.get_xlim()[1] - ax.get_xlim()[0])
-        ax.text(x_label, yi, f"{v:.1f} km/h",
-                va='center', ha='right',
-                color='white', fontweight='bold', fontsize=10,
-                path_effects=[pe.withStroke(linewidth=1, foreground="black")])
-    plt.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-# =========================
-# RENDER
-# =========================
-st.subheader("Reportes por partido")
-
-vis1_player_total_vs_mpm(df_player, player_name)
-vis2_player_b345_stacked(df_player, player_name)
-vis3_player_b345_sum_pct(df_player, player_name)
-vis4_player_accels(df_player, player_name)
-vis5_player_decels(df_player, player_name)
-vis6_player_expl_to_hsr(df_player, player_name)
-vis7_player_expl_to_sprint(df_player, player_name)
-vis8_player_psv99(df_player, player_name)
+    st.success(f"Listo ✅ Entradas: {len(df_all):,} | Jugadores únicos (player+team): {len(df_players):,}")
+
+    st.divider()
+    st.subheader("Elegí 2 jugadores (sin filtrar por puesto)")
+
+    # Selects: 2 jugadores (player_id + team_id)
+    p1_label = st.selectbox("Jugador A", df_players["label"].tolist(), index=0)
+    p2_label = st.selectbox("Jugador B", df_players["label"].tolist(), index=min(1, len(df_players)-1))
+
+    p1_row = df_players.loc[df_players["label"] == p1_label].iloc[0]
+    p2_row = df_players.loc[df_players["label"] == p2_label].iloc[0]
+
+    player_a_id, team_a_id = int(p1_row["player_id"]), int(p1_row["team_id"])
+    player_b_id, team_b_id = int(p2_row["player_id"]), int(p2_row["team_id"])
+
+    # Rangos de minutos por partido (independientes por jugador)
+    st.divider()
+    st.subheader("Filtro por minutos por partido (rango)")
+
+    # límites sugeridos
+    min_lim = 0
+    max_lim = 130
+
+    colA, colB = st.columns(2)
+    with colA:
+        minA, maxA = st.slider("Jugador A — Min/Max minutos por partido",
+                               min_value=min_lim, max_value=max_lim, value=(60, 130), step=1)
+    with colB:
+        minB, maxB = st.slider("Jugador B — Min/Max minutos por partido",
+                               min_value=min_lim, max_value=max_lim, value=(60, 130), step=1)
+
+    # Filtrar filas
+    dA = _filter_player_rows(df_all, player_a_id, team_a_id, minA, maxA)
+    dB = _filter_player_rows(df_all, player_b_id, team_b_id, minB, maxB)
+
+    if dA.empty:
+        st.warning("Jugador A: no hay filas que cumplan el rango de minutos elegido.")
+    if dB.empty:
+        st.warning("Jugador B: no hay filas que cumplan el rango de minutos elegido.")
+
+    # Calcular promedios (solo métricas con alias)
+    meansA = _compute_means_for_player(dA)
+    meansB = _compute_means_for_player(dB)
+
+    # Etiquetas columnas (cortas)
+    col_name_a = f"A: {p1_row['player_short_name']} ({p1_row['team_name']})"
+    col_name_b = f"B: {p2_row['player_short_name']} ({p2_row['team_name']})"
+
+    # Tabla comparativa
+    df_cmp = _build_comparison_table(meansA, meansB, col_name_a, col_name_b)
+
+    st.divider()
+    st.subheader("Tabla comparativa (promedios)")
+
+    sty = _styler_bold_max(df_cmp, col_name_a, col_name_b)
+    st.dataframe(sty, use_container_width=True, height=720)
+
+    # Resumen abajo (mins totales + partidos)
+    st.divider()
+    st.subheader("Resumen de la muestra")
+
+    def _mins_sum(d):
+        if d.empty or "minutes_full_all" not in d.columns:
+            return 0.0
+        return float(pd.to_numeric(d["minutes_full_all"], errors="coerce").fillna(0).sum())
+
+    sumA = round(_mins_sum(dA), 0)
+    sumB = round(_mins_sum(dB), 0)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**Jugador A:** {p1_label}")
+        st.write(f"Partidos que cumplieron el rango: **{len(dA):,}**")
+        st.write(f"Minutos totales (muestra): **{int(sumA):,}**")
+    with c2:
+        st.markdown(f"**Jugador B:** {p2_label}")
+        st.write(f"Partidos que cumplieron el rango: **{len(dB):,}**")
+        st.write(f"Minutos totales (muestra): **{int(sumB):,}**")
+
+    # (Opcional) debug raw
+    with st.expander("Ver filas raw filtradas (debug)", expanded=False):
+        st.write("Jugador A — filas filtradas")
+        st.dataframe(dA, use_container_width=True, height=260)
+        st.write("Jugador B — filas filtradas")
+        st.dataframe(dB, use_container_width=True, height=260)
