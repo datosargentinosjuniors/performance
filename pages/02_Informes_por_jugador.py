@@ -279,7 +279,7 @@ st.header("Seleccione competición para cada jugador (A y B)")
 left, right = st.columns(2, vertical_alignment="top")
 
 with left:
-    st.markdown("### Jugador A — Competición")
+    st.markdown("### Jugador A")
     a_country = st.selectbox("A - País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="a_country")
     a_comp_label = st.selectbox("A - Competencia", list(COMPETITION_CATALOG[a_country].keys()), index=0, key="a_comp")
     a_info = COMPETITION_CATALOG[a_country][a_comp_label]
@@ -289,7 +289,7 @@ with left:
     st.caption(f"Referencia para A: Competición={a_competition_id} | Edición={a_competition_edition_id}")
 
 with right:
-    st.markdown("### Jugador B — Competición")
+    st.markdown("### Jugador B")
     b_country = st.selectbox("B - País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="b_country")
     b_comp_label = st.selectbox("B - Competencia", list(COMPETITION_CATALOG[b_country].keys()), index=0, key="b_comp")
     b_info = COMPETITION_CATALOG[b_country][b_comp_label]
