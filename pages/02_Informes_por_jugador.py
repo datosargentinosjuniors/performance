@@ -274,7 +274,7 @@ today_key = date.today().isoformat()
 # =========================
 # UI: SELECTORES A/B (siempre visibles)
 # =========================
-st.subheader("Seleccione competición para cada jugador (A y B)")
+st.header("Seleccione competición para cada jugador (A y B)")
 
 left, right = st.columns(2, vertical_alignment="top")
 
