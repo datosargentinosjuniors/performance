@@ -73,51 +73,51 @@ COMPETITION_CATALOG = {
 # ALIASES (solo estas métricas quedan)
 # =========================
 METRIC_ALIASES_ES = {
-    "total_distance_full_all": "Distancia total",
-    "total_metersperminute_full_all": "Metros por minuto",
-    "running_distance_full_all": "Distancia corriendo (B3)",
-    "hsr_distance_full_all": "Distancia en HSR",
+    "total_distance_full_all": "Distancia total (m)",
+    "total_metersperminute_full_all": "Metros por minuto (m)",
+    "running_distance_full_all": "Distancia corriendo (B3) (m)",
+    "hsr_distance_full_all": "Distancia en HSR (B4) (m)",
     "hsr_count_full_all": "Cantidad de veces que alcanzó HSR (B4)",
-    "sprint_distance_full_all": "Distancia en sprint (B5)",
+    "sprint_distance_full_all": "Distancia en sprint (B5) (m)",
     "sprint_count_full_all": "Cantidad de veces que realizó un sprint (B5)",
     "hi_count_full_all": "Cantidad de veces que alcanzó una alta intensidad (B4 o B5)",
-    "hi_distance_full_all": "Distancia en alta intensidad (B4 + B5)",
+    "hi_distance_full_all": "Distancia en alta intensidad (B4 + B5) (m)",
     "highaccel_count_full_all": "Aceleraciones altas",
     "highdecel_count_full_all": "Desaceleraciones altas",
     "medaccel_count_full_all": "Aceleraciones medias",
     "meddecel_count_full_all": "Desaceleraciones medias",
-    "psv99": "Velocidad máxima (PSV99)",
+    "psv99": "Velocidad máxima (PSV99) (km/h)",
     "explacceltohsr_count_full_all": "Aceleraciones explosivas a HSR (B4)",
-    "timetohsr": "Tiempo a un HSR (B4)",
+    "timetohsr": "Tiempo a un HSR (B4) (segundos)",
     "explacceltosprint_count_full_all": "Aceleraciones explosivas a sprint (B5)",
-    "timetosprint": "Tiempo a un sprint (B5)",
+    "timetosprint": "Tiempo a un sprint (B5) (segundos)",
     "cod_count_full_all": "Cambios de dirección",
-    "timetohsrpostcod": "Tiempo a un HSR (B4) post cambio de ritmo",
-    "timetosprintpostcod": "Tiempo a un sprint (B5) post cambio de ritmo",
+    "timetohsrpostcod": "Tiempo a un HSR (B4) post cambio de ritmo (segundos)",
+    "timetosprintpostcod": "Tiempo a un sprint (B5) post cambio de ritmo (segundos)",
 }
 
 ROW_ORDER_ES = [
-    "Distancia total",
-    "Metros por minuto",
-    "Distancia corriendo (B3)",
-    "Distancia en HSR",
+    "Distancia total (m)",
+    "Metros por minuto (m)",
+    "Distancia corriendo (B3) (m)",
+    "Distancia en HSR (B4) (m)",
     "Cantidad de veces que alcanzó HSR (B4)",
-    "Distancia en sprint (B5)",
+    "Distancia en sprint (B5) (m)",
     "Cantidad de veces que realizó un sprint (B5)",
     "Cantidad de veces que alcanzó una alta intensidad (B4 o B5)",
-    "Distancia en alta intensidad (B4 + B5)",
+    "Distancia en alta intensidad (B4 + B5) (m)",
     "Aceleraciones altas",
     "Desaceleraciones altas",
     "Aceleraciones medias",
     "Desaceleraciones medias",
-    "Velocidad máxima (PSV99)",
+    "Velocidad máxima (PSV99) (km/h)",
     "Aceleraciones explosivas a HSR (B4)",
-    "Tiempo a un HSR (B4)",
+    "Tiempo a un HSR (B4) (segundos)",
     "Aceleraciones explosivas a sprint (B5)",
-    "Tiempo a un sprint (B5)",
+    "Tiempo a un sprint (B5) (segundos)",
     "Cambios de dirección",
-    "Tiempo a un HSR (B4) post cambio de ritmo",
-    "Tiempo a un sprint (B5) post cambio de ritmo",
+    "Tiempo a un HSR (B4) post cambio de ritmo (segundos)",
+    "Tiempo a un sprint (B5) post cambio de ritmo (segundos)",
 ]
 
 # =========================
@@ -333,8 +333,8 @@ df_players_b = st.session_state["df_players_b"]
 if df_all_a is not None and df_all_b is not None and df_players_a is not None and df_players_b is not None:
     st.success(
         f"Listo ✅ "
-        f"A: entradas {len(df_all_a):,} | jugadores {len(df_players_a):,}   ·   "
-        f"B: entradas {len(df_all_b):,} | jugadores {len(df_players_b):,}"
+        f"Consulta A: Entradas {len(df_all_a):,} | Jugadores {len(df_players_a):,}   -   "
+        f"Consulta B: Entradas {len(df_all_b):,} | Jugadores {len(df_players_b):,}"
     )
 
     st.divider()
