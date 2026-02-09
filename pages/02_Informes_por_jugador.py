@@ -10,8 +10,8 @@ from io import BytesIO
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="SkillCorner — Comparativa física (2 competiciones)", layout="wide")
-st.title("🏃‍♂️ SkillCorner — Comparativa de jugadores (A vs B) con 2 competiciones/ediciones")
+st.set_page_config(page_title="Comparativa física - Tracking", layout="wide")
+st.title("🏃‍♂️ Comparador de jugadores")
 
 # =========================
 # CATÁLOGO (IDs fijos)
@@ -257,7 +257,7 @@ def _mins_sum(d: pd.DataFrame) -> float:
 # =========================
 b1, b2, b3 = st.columns([5, 1, 1])
 with b2:
-    if st.button("🔄 Limpiar cache API"):
+    if st.button("🔄 Limpiar consulta"):
         try:
             fetch_physical_one.clear()
         except Exception:
@@ -274,37 +274,37 @@ today_key = date.today().isoformat()
 # =========================
 # UI: SELECTORES A/B (siempre visibles)
 # =========================
-st.subheader("Selección de competición/edición (A y B)")
+st.subheader("Seleccione competición para cada jugador (A y B)")
 
 left, right = st.columns(2, vertical_alignment="top")
 
 with left:
     st.markdown("### Jugador A — Competición")
-    a_country = st.selectbox("A · País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="a_country")
-    a_comp_label = st.selectbox("A · Competencia", list(COMPETITION_CATALOG[a_country].keys()), index=0, key="a_comp")
+    a_country = st.selectbox("A - País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="a_country")
+    a_comp_label = st.selectbox("A - Competencia", list(COMPETITION_CATALOG[a_country].keys()), index=0, key="a_comp")
     a_info = COMPETITION_CATALOG[a_country][a_comp_label]
     a_competition_id = a_info["competition_id"]
-    a_edition_label = st.selectbox("A · Edición", list(a_info["editions"].keys()), index=0, key="a_edition")
+    a_edition_label = st.selectbox("A - Edición", list(a_info["editions"].keys()), index=0, key="a_edition")
     a_competition_edition_id = a_info["editions"][a_edition_label]
     st.caption(f"A: competition_id={a_competition_id} | competition_edition_id={a_competition_edition_id}")
 
 with right:
     st.markdown("### Jugador B — Competición")
-    b_country = st.selectbox("B · País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="b_country")
-    b_comp_label = st.selectbox("B · Competencia", list(COMPETITION_CATALOG[b_country].keys()), index=0, key="b_comp")
+    b_country = st.selectbox("B - País/Liga", list(COMPETITION_CATALOG.keys()), index=0, key="b_country")
+    b_comp_label = st.selectbox("B - Competencia", list(COMPETITION_CATALOG[b_country].keys()), index=0, key="b_comp")
     b_info = COMPETITION_CATALOG[b_country][b_comp_label]
     b_competition_id = b_info["competition_id"]
-    b_edition_label = st.selectbox("B · Edición", list(b_info["editions"].keys()), index=0, key="b_edition")
+    b_edition_label = st.selectbox("B - Edición", list(b_info["editions"].keys()), index=0, key="b_edition")
     b_competition_edition_id = b_info["editions"][b_edition_label]
     st.caption(f"B: competition_id={b_competition_id} | competition_edition_id={b_competition_edition_id}")
 
 # Botón descarga: guarda en session_state (clave para que NO "vuelva arriba")
-do_fetch = st.button("📥 Descargar (A y B)")
+do_fetch = st.button("📥 Traer información")
 
 if do_fetch:
-    with st.spinner("Descargando /physical para A…"):
+    with st.spinner("Descargando para A…"):
         df_all_a = fetch_physical_one(a_competition_id, a_competition_edition_id, cache_date=today_key)
-    with st.spinner("Descargando /physical para B…"):
+    with st.spinner("Descargando para B…"):
         df_all_b = fetch_physical_one(b_competition_id, b_competition_edition_id, cache_date=today_key)
 
     if df_all_a.empty:
@@ -338,7 +338,7 @@ if df_all_a is not None and df_all_b is not None and df_players_a is not None an
     )
 
     st.divider()
-    st.subheader("Elegí 2 jugadores (A y B) + rangos de minutos por partido")
+    st.subheader("Elegí a los dos jugadores (A y B) y sus respectivos rangos de minutos por partido")
 
     colL, colR = st.columns(2, vertical_alignment="top")
 
@@ -366,7 +366,7 @@ if df_all_a is not None and df_all_b is not None and df_players_a is not None an
     df_cmp = _build_comparison_table(meansA, meansB, col_name_a, col_name_b)
 
     st.divider()
-    st.subheader("Tabla comparativa (promedios) — mayor en negrita (sin colores)")
+    st.subheader("Tabla comparativa (promedios) | El valor mayor está en negrita")
 
     st.dataframe(_styler_bold_max(df_cmp, col_name_a, col_name_b), use_container_width=True, height=720)
 
@@ -396,4 +396,4 @@ if df_all_a is not None and df_all_b is not None and df_players_a is not None an
         st.write("Jugador B — filas filtradas")
         st.dataframe(dB, use_container_width=True, height=260)
 else:
-    st.info("Elegí competiciones/ediciones y tocá **📥 Descargar (A y B)** para cargar el listado de jugadores.")
+    st.info("Elegí competiciones/ediciones y tocá **📥 Traer información** para cargar el listado de jugadores.")
