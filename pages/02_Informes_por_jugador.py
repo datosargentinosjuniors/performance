@@ -286,7 +286,7 @@ with left:
     a_competition_id = a_info["competition_id"]
     a_edition_label = st.selectbox("A - Edición", list(a_info["editions"].keys()), index=0, key="a_edition")
     a_competition_edition_id = a_info["editions"][a_edition_label]
-    st.caption(f"A: competition_id={a_competition_id} | competition_edition_id={a_competition_edition_id}")
+    st.caption(f"Referencia para A: Competición={a_competition_id} | Edición={a_competition_edition_id}")
 
 with right:
     st.markdown("### Jugador B — Competición")
@@ -296,7 +296,7 @@ with right:
     b_competition_id = b_info["competition_id"]
     b_edition_label = st.selectbox("B - Edición", list(b_info["editions"].keys()), index=0, key="b_edition")
     b_competition_edition_id = b_info["editions"][b_edition_label]
-    st.caption(f"B: competition_id={b_competition_id} | competition_edition_id={b_competition_edition_id}")
+    st.caption(f"Referencia para B: Competición={b_competition_id} | Edición={b_competition_edition_id}")
 
 # Botón descarga: guarda en session_state (clave para que NO "vuelva arriba")
 do_fetch = st.button("📥 Traer información")
